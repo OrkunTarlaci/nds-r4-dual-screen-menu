@@ -1,178 +1,190 @@
-# Nintendo DS — Dual Screen Edition (R4 kartı için özel menü)
+# Nintendo DS — Dual Screen Edition (custom menu for R4 flashcarts)
 
-Klasik R4 türü flash kartlar için, iki ekranlı, 3B kartuş görünümlü bir oyun menüsü.
-NDS oyunlarını kartın kendi yazılımıyla (YSMenu), GBA oyunlarını **GBARunner2**, GB/GBC oyunlarını **GameYob** ile açar.
+**English | [Türkçe](README.tr.md)**
 
-> **English summary.** A custom two-screen launcher for classic R4-style DS flashcarts (tested on an
-> *R4 Upgrade Revolution for DS (NDSL/NDS)* running YSMenu). The bottom screen shows a 3D carousel of real-looking
-> cartridges (DS, GBA, GB), the top screen shows the selected game. NDS games are launched through the cart's own
-> YSMenu kernel, GBA through GBARunner2, GB/GBC through GameYob. This repository is meant to be installed **with the help
-> of Claude (Claude Code)**: open the folder in Claude Code, insert your SD card and say *"Read README.md and set this up
-> for my card."* The section **"Claude için talimatlar"** below tells Claude exactly what to ask and do. Claude reads
-> Turkish fine; you can talk to it in any language.
+A two-screen game menu with 3D cartridges for classic R4-style DS flashcarts.
+It launches NDS games through the cart's own software (YSMenu), GBA games through **GBARunner2** and GB/GBC games
+through **GameYob**.
 
----
-
-## İçindekiler
-
-1. [Neler var](#neler-var)
-2. [Önemli uyarılar](#önemli-uyarılar)
-3. [Claude ile kurulum (kullanıcı için)](#claude-ile-kurulum-kullanıcı-için)
-4. [Claude için talimatlar](#claude-için-talimatlar)
-5. [Nasıl çalışıyor (mimari)](#nasıl-çalışıyor-mimari)
-6. [SD karttaki klasör yapısı ve dosya adları](#sd-karttaki-klasör-yapısı-ve-dosya-adları)
-7. [Oyun ekleme ve resimler](#oyun-ekleme-ve-resimler)
-8. [Menü dilini değiştirme](#menü-dilini-değiştirme)
-9. [Derleme ortamı](#derleme-ortamı)
-10. [melonDS ile test](#melonds-ile-test)
-11. [Kontroller](#kontroller)
-12. [Sorun giderme ve öğrendiklerimiz](#sorun-giderme-ve-öğrendiklerimiz)
-13. [Kaynak dosyalar](#kaynak-dosyalar)
-14. [Teşekkür ve lisanslar](#teşekkür-ve-lisanslar)
+> This repository is meant to be installed **with the help of Claude (Claude Code)**. Open the folder in Claude Code,
+> insert your SD card and say: *"Read README.md and set this menu up for my card."* The section
+> [Instructions for Claude](#instructions-for-claude) tells Claude exactly what to ask and what to do.
+> You can talk to Claude in any language.
 
 ---
 
-## Neler var
+## Contents
 
-- **Alt ekran (dokunmatik):** 3B kartuş halkası. DS kartları gerçek DS oyun kartı gibi görünür.
-  - Etiket gerçek kart fotoğrafından gelir: NINTENDO DS bandı, ESRB, Nintendo mührü, `NTR-XXXX-USA` kodu.
-  - Fotoğrafı bulunamayan oyunlar için aynı düzende, kapak resminden kart üretilir.
-  - GBA kartuşları gri GBA kabuğunda, GB kartuşları Game Boy kabuğunda durur.
-  - Kartuşlar yerde yansır, seçilen kart hafifçe süzülür.
-- **Üst ekran (vitrin):** Seçili oyunun simgesi, adı, yayıncısı ve kayıt durumu, arka planda kapağın bulanık hali.
-  Oyun değişince yumuşak geçiş olur.
-- **Bölümler:** `NDS`, `GBA`, `GB`. L/R tuşları veya dokunarak geçilir.
-- **Açılış:** 4 saniyelik "Nintendo DS" animasyonu. Kart bu sırada okunur, beyaz bekleme ekranı yok.
-- **Parlaklık:** 7 kademe (SELECT).
-  - 1–5: donanım arka ışığı.
-  - 6–7: arka ışık tam güçte, ayrıca görüntü yazılımla aydınlatılır (yalnızca menüde).
-- **Son oyun:** Menü, en son açılan oyunda başlar. Bu bilgi YSMenu'nün kendi `AUTO_BOOT` satırından okunur; menü karta
-  ayrı bir dosya yazmaz.
-- **Performans:** Her kare 16,7 ms'nin altında, 60 FPS.
-  - Üst ekran sayfası 8 parçaya bölünüp birkaç kareye yayılır.
-  - Geçiş efektini ekranın parlaklık donanımı yapar.
-  - Resimler menü boştayken arka planda yüklenir.
-
-## Önemli uyarılar
-
-- **Bu depoda oyun yok.** ROM, kayıt dosyası (`.sav`), kapak/kart resmi ve kartın orijinal yazılımı **bulunmaz ve
-  eklenmemelidir.** Herkes kendi kartının yazılımını ve kendi yedeklediği oyunları kullanır.
-- **SD karta yazmadan önce mutlaka tam yedek alın.** `tools/sd/raw_backup.py` sektör sektör yedek alır.
-- **Ucuz/bozuk USB kart okuyucular SD kartı bozabilir.** Bu projede bir okuyucu, karta veri yerine kendi USB paketini
-  ("USBS/USBC") yazıp bir klasörü ve dosya tablosunu bozdu. Sağlam bir okuyucu kullanın.
-- Windows *"Bu sürücüyü tarayıp onarmak ister misiniz?"* diye sorarsa **onarmayın.** Onarım (chkdsk) kayıt dosyalarını
-  silebilir. Önce yedek alın, sonra Claude'a inceletin.
+1. [Features](#features)
+2. [Important warnings](#important-warnings)
+3. [Installing with Claude (for users)](#installing-with-claude-for-users)
+4. [Instructions for Claude](#instructions-for-claude)
+5. [How it works (architecture)](#how-it-works-architecture)
+6. [SD card layout and file names](#sd-card-layout-and-file-names)
+7. [Adding games and artwork](#adding-games-and-artwork)
+8. [Changing the menu language](#changing-the-menu-language)
+9. [Build environment](#build-environment)
+10. [Testing with melonDS](#testing-with-melonds)
+11. [Controls](#controls)
+12. [Troubleshooting and lessons learned](#troubleshooting-and-lessons-learned)
+13. [Source files](#source-files)
+14. [Credits and licenses](#credits-and-licenses)
 
 ---
 
-## Claude ile kurulum (kullanıcı için)
+## Features
 
-1. Bilgisayara **Claude Code**'u kurun (masaüstü uygulaması veya terminal).
-2. Bu depoyu indirin ve klasörü Claude Code'da açın.
-3. SD kartı **sağlam bir kart okuyucuyla** bilgisayara takın.
-4. Claude'a şunu yazın:
-   > README.md'yi oku ve bu menüyü benim kartıma kur.
-5. Claude size sorular soracak (aşağıda listelendi). Cevaplayın; gerisini o yapar, her adımda size gösterir ve
-   onayınızı alır.
+- **Bottom screen (touch):** a 3D carousel of cartridges.
+  - DS cards look like real DS game cards. The label comes from a photo of the real card: NINTENDO DS band, ESRB,
+    Nintendo seal, `NTR-XXXX-USA` code.
+  - Games without a card photo get a card built from their cover art in the same layout.
+  - GBA games sit in a grey GBA shell, GB games in a Game Boy shell.
+  - Cartridges reflect on the floor and the selected one floats gently.
+- **Top screen (showcase):** the selected game's icon, title, publisher and save status, over a blurred version of its
+  cover. Switching games fades smoothly.
+- **Sections:** `NDS`, `GBA`, `GB`. Switch with L/R or by tapping.
+- **Boot:** a 4-second "Nintendo DS" animation. The SD card is read while it plays, so there is no white loading screen.
+- **Brightness:** 7 levels (SELECT).
+  - 1–5: hardware backlight.
+  - 6–7: backlight at full power plus a software brightening of the image (menu only).
+- **Last game:** the menu starts on the last game you launched. This is read from YSMenu's own `AUTO_BOOT` line; the
+  menu writes no extra file to the card.
+- **Performance:** every frame stays under 16.7 ms (60 FPS).
+  - The top-screen page is drawn in 8 slices spread over several frames.
+  - The fade is done by the display's brightness hardware.
+  - Images are loaded in the background while the menu is idle.
 
-Hazırlamanız gerekenler:
-- Kartın üzerinde yazan **tam model adı**. Bir fotoğraf da çekebilirsiniz.
-- Kartın **şu anki çalışan yazılımı** (SD kartın kökündeki dosyalar). Kart zaten çalışıyorsa bunlar SD kartta vardır.
-- Konsol modeli (DS, DS Lite, DSi, 3DS).
-- Menünün hangi dilde olmasını istediğiniz.
+> The menu's on-screen text is currently **Turkish**. Claude asks which language you want and translates it; see
+> [Changing the menu language](#changing-the-menu-language).
+
+## Important warnings
+
+- **This repository contains no games.** ROMs, save files (`.sav`), cover/card artwork and the cart's original
+  firmware are **not included and must not be added**. Everyone uses their own cart's software and their own backups.
+- **Always take a full backup before writing to the SD card.** `tools/sd/raw_backup.py` makes a sector-by-sector
+  image.
+- **Cheap or faulty USB card readers can corrupt the SD card.** In this project one reader wrote its own USB packets
+  ("USBS/USBC") to the card instead of data and broke a folder and the file allocation table. Use a good reader.
+- If Windows asks *"Do you want to scan and fix this drive?"*, **do not let it repair.** The repair (chkdsk) can delete
+  save files. Back up first, then let Claude inspect the card.
 
 ---
 
-## Claude için talimatlar
+## Installing with Claude (for users)
 
-> Bu bölüm, bu depoyu açan Claude içindir. Kullanıcı bir şey yazmadıysa bile bu adımları izle.
+1. Install **Claude Code** (desktop app or terminal).
+2. Download this repository and open the folder in Claude Code.
+3. Connect the SD card to the computer with a **good card reader**.
+4. Tell Claude:
+   > Read README.md and set this menu up for my card.
+5. Claude will ask you some questions (listed below). Answer them; it does the rest, shows you each step and asks for
+   your approval.
 
-### 0. Başlamadan önce kullanıcıya sor
+Have these ready:
+- The **exact model name** printed on the cart. You can also take a photo.
+- The cart's **currently working software** (the files in the root of the SD card). If the cart already works, they
+  are on the SD card.
+- Your console model (DS, DS Lite, DSi, 3DS).
+- The language you want the menu in.
 
-Bunları tek tek, sade bir dille sor. Kullanıcı teknik olmayabilir; her sorunun neden önemli olduğunu bir cümleyle
-açıkla. Cevapları bir yere not et.
+---
 
-1. **Menü dili.** Hangi dilde olsun: Türkçe, İngilizce, başka? Şu anki metinler Türkçe;
-   [Menü dilini değiştirme](#menü-dilini-değiştirme) bölümüne bak.
-2. **Konsol modeli.** Nintendo DS (ilk model), DS Lite, DSi veya 3DS?
-   - Menü DS ve DS Lite için yazıldı.
-   - DSi/3DS'te flash kart DS modunda çalışır. Parlaklık ve arka ışık farklı davranabilir; kurulum öncesi bunu belirt.
-3. **Kartın modeli.** Kartın üzerinde tam olarak ne yazıyor? Fotoğraf iste. Örnek: "R4 Upgrade Revolution for DS
+## Instructions for Claude
+
+> This section is for the Claude that opens this repository. Follow these steps even if the user did not ask for them
+> explicitly.
+
+### 0. Ask the user before you start
+
+Ask these one by one, in plain language. The user may not be technical; explain in one sentence why each question
+matters. Keep notes of the answers.
+
+1. **Menu language.** Which language: English, Turkish, something else? The current texts are Turkish; see
+   [Changing the menu language](#changing-the-menu-language).
+2. **Console model.** Original Nintendo DS, DS Lite, DSi or 3DS?
+   - The menu was written for DS and DS Lite.
+   - On DSi/3DS the flashcart runs in DS mode. Brightness and backlight may behave differently; say so before
+     installing.
+3. **Cart model.** What exactly is printed on the cart? Ask for a photo. Examples: "R4 Upgrade Revolution for DS
    (NDSL/NDS)", "R4i Gold 3DS", "R4i-SDHC", "Acekard 2i", "DSTT".
-   - Etiket kartın gerçek donanımını göstermeyebilir; aynı etiketli klonlar farklı çekirdek kullanır.
-   - SD kartın kökündeki dosyalara bakarak hangi yazılımı (çekirdeği) çalıştırdığını belirle:
-     - `R4.dat` + `TTMenu/` + `TTMenu.dat` → YSMenu tabanlı.
+   - The label may not reflect the real hardware; clones with the same label run different kernels.
+   - Work out which software (kernel) it runs from the files in the SD card root:
+     - `R4.dat` + `TTMenu/` + `TTMenu.dat` → YSMenu-based.
      - `_wfwd/` → Wood R4.
      - `__rpg/` → AKAIO.
-     - `_DS_MENU.DAT` → orijinal R4 çekirdeği.
-4. **Kartın çalışan orijinal yazılımı var mı?**
-   - Kart şu an normal menüsüyle açılıyor mu? Bu kurulum o yazılımın **üzerine** yapılır. NDS oyunları hâlâ o yazılımla
-     açılır, menümüz onun önüne geçer.
-   - Yoksa ya da kart boşsa: modele uygun çekirdeği kullanıcıyla birlikte bul (kart üreticisinin sitesi veya bilinen
-     arşivler). Kullanıcının indirmesini ve onaylamasını iste.
-5. **SD kart.** Boyutu kaç GB, dosya sistemi ne? FAT32 olmalı. Kartta kayıtlı oyun ilerlemesi var mı? Varsa önce yedek.
-6. **Kart okuyucu.** Kart hangi okuyucuyla takılı? Bilinmeyen/ucuz bir okuyucuysa riski anlat.
-   [Sorun giderme](#sorun-giderme-ve-öğrendiklerimiz) bölümüne bak.
-7. **Oyunlar.** NDS, GBA, GB/GBC oyunları hangi klasörlerde? Kullanıcı numaralı düzen istiyor mu
-   (`0001 - Oyun Adı.nds`)? Dosyaları yeniden adlandırma önerisini mutlaka onaya sun; `.sav` dosyalarını da birlikte
-   adlandır.
-8. **Görünüm tercihleri.** Mevcut tasarım (gerçek kart görünümü, koyu tema) tamam mı, istediği değişiklik var mı?
+     - `_DS_MENU.DAT` → original R4 kernel.
+4. **Does the cart have its original working software?**
+   - Does the cart currently boot into its normal menu? This install goes **on top of** that software. NDS games are
+     still launched by it; our menu sits in front of it.
+   - If not, or if the card is empty: find the right kernel for the model together with the user (the cart maker's
+     site or well-known archives). Ask the user to download it and approve it.
+5. **SD card.** How many GB, which file system? It must be FAT32. Are there game saves on it? If so, back up first.
+6. **Card reader.** Which reader is the card in? If it is an unknown/cheap reader, explain the risk; see
+   [Troubleshooting](#troubleshooting-and-lessons-learned).
+7. **Games.** Which folders hold the NDS, GBA and GB/GBC games? Does the user want numbered names
+   (`0001 - Game Title.nds`)? Always present renaming as a proposal for approval, and rename the `.sav` files along
+   with their games.
+8. **Look and feel.** Is the current design (real-card look, dark theme) fine, or do they want changes?
 
-### 1. Güvenlik kuralları (her zaman)
+### 1. Safety rules (always)
 
-- **İlk iş tam ham yedek:**
+- **First thing: a full raw backup:**
   ```
   set SD_DRIVE=F:
-  python tools/sd/raw_backup.py kart_yedek.img
+  python tools/sd/raw_backup.py card_backup.img
   ```
-  Okuyucu takılırsa araç bekleyip yeniden dener. Yedek bitmeden karta yazma.
-- ROM'lara ve `.sav` dosyalarına **asla** içerik yazma. Yalnızca, kullanıcı onaylarsa, yeniden adlandırma yap.
-  Yeniden adlandırmayı iki aşamada yap (önce geçici ad), böylece ad çakışması olmaz.
-- Büyük oyun dosyalarını gereksiz yere açma. Oyun kodunu ROM başlığının ilk 16 baytından oku (`0x0C`, 4 bayt).
-- Karta yazdıktan sonra **Windows önbelleğini atlayarak** doğrula: `python tools/sd/verify_card.py <kart_yolu> <yerel_dosya> ...`.
-  Bu araç dosya içeriğini, iki FAT kopyasının eşliğini, tüm dosya zincirlerini ve okuyucu paketi izlerini kontrol eder.
-  Windows'un `Get-FileHash` sonucu önbellekten gelebilir, tek başına yetmez.
-- Yazdıktan sonra `Write-VolumeCache -DriveLetter F` ile önbelleği boşalt ve kullanıcıya "Güvenle Kaldır" dedir.
-- Karta yazmadan önce kullanıcıya ne yazacağını söyle. Kullanıcı açıkça "sormadan yaz" demediyse onay al.
-- `chkdsk` veya Windows onarımı çalıştırma. Sorun varsa önce yedek al, yedeğin üzerinde incele.
+  If the reader stalls, the tool waits and retries. Do not write to the card until the backup is complete.
+- **Never** write content into ROMs or `.sav` files. Only rename them, and only with the user's approval. Rename in
+  two steps (temporary name first) so names cannot collide.
+- Do not open large game files unnecessarily. Read the game code from the first 16 bytes of the ROM header (`0x0C`,
+  4 bytes).
+- After writing to the card, verify **bypassing the Windows cache**:
+  `python tools/sd/verify_card.py <card_path> <local_file> ...`.
+  The tool checks file contents, that both FAT copies match, every file's cluster chain, and traces of reader
+  packets. Windows' `Get-FileHash` can come from the cache and is not enough on its own.
+- After writing, flush the cache with `Write-VolumeCache -DriveLetter F` and have the user use "Safely Remove".
+- Tell the user what you are about to write to the card before writing. Get approval unless the user explicitly said
+  "write without asking".
+- Do not run `chkdsk` or Windows repair. If something is wrong, take a backup first and investigate on the backup.
 
-### 2. Kartın açılış zincirini kur
+### 2. Set up the cart's boot chain
 
-Bu proje için seçilen yol (YSMenu tabanlı R4 klonu):
+The path chosen for this project (YSMenu-based R4 clone):
 
 ```
-DS açılır → kart, SD kökündeki R4.dat'ı çalıştırır
-          → R4.dat = TWiLight Menu++ "Autoboot" dosyası (kartın modeline uygun olanı)
-          → fat:/_nds/TWiLightMenu/main.srldr çalışır = BU MENÜ
-NDS oyunu seçilince:
-          → menü, TTMenu/YSMenu.ini içindeki AUTO_BOOT satırını yerinde değiştirir
-          → fat:/_macro/ysmenu.dat (kartın ORİJİNAL R4.dat dosyası = YSMenu çekirdeği) çalıştırılır
-          → YSMenu, AUTO_BOOT'taki oyunu doğrudan açar
+DS boots → the cart runs R4.dat from the SD root
+         → R4.dat = TWiLight Menu++ "Autoboot" file (the one for this cart model)
+         → fat:/_nds/TWiLightMenu/main.srldr runs = THIS MENU
+When an NDS game is chosen:
+         → the menu rewrites the AUTO_BOOT line in TTMenu/YSMenu.ini in place
+         → fat:/_macro/ysmenu.dat (the cart's ORIGINAL R4.dat = YSMenu kernel) is run
+         → YSMenu launches the game in AUTO_BOOT directly
 ```
 
-Adımlar:
-1. Kartın **orijinal** kök `R4.dat` dosyasını `/_macro/ysmenu.dat` olarak kopyala. Bu, YSMenu çekirdeğinin kendisi.
-   Orijinali ayrıca yedekle.
-2. TWiLight Menu++ sürümündeki `Autoboot/<kart modeli>/` klasöründen uygun `R4.dat` dosyasını (ve varsa yanındaki
-   dosyaları) SD köküne koy.
-   - Bu projede `Autoboot/R4i-SDHC/` dosyaları çalıştı.
-   - Farklı kartta önce TWiLight'ın "Flashcard users" belgelerinde kartı ara. Doğru dosyayı kullanıcıyla birlikte seç.
-3. `TTMenu/YSMenu.ini` sonuna **bir kez** bu satırı ekle: `;MACRO_PAD` + 300 boşluk + CRLF.
-   - Menü `AUTO_BOOT` değerini değiştirirken dosya boyunu sabit tutmak için fazlalığı bu satırdan alır. Böylece dosya
-     yerinde (`r+b`) yazılır, dosya tablosuna (FAT) dokunulmaz.
-   - `YSMenu.ini` içinde `AUTO_BOOT=` satırı yoksa önce kullanıcıyla birlikte ekle.
-4. Menüyü derle ve `main.srldr` olarak kopyala: `/_nds/TWiLightMenu/main.srldr`.
-5. GBA için `/_nds/GBARunner2_arm7dldi_ds.nds`. GBARunner2'nin DS (arm7 DLDI) sürümü, ayrıca GBA BIOS gerekir; bkz.
-   GBARunner2 belgeleri.
-6. GB/GBC için `/_nds/TWiLightMenu/emulators/gameyob.nds` (TWiLight Menu++ paketinden).
+Steps:
+1. Copy the cart's **original** root `R4.dat` to `/_macro/ysmenu.dat`. This is the YSMenu kernel itself. Keep a
+   separate backup of the original.
+2. Put the matching `R4.dat` (and any files next to it) from the TWiLight Menu++ release's `Autoboot/<cart model>/`
+   folder in the SD root.
+   - In this project the `Autoboot/R4i-SDHC/` files worked.
+   - For another cart, first look it up in TWiLight's "Flashcard users" docs. Choose the right file together with the
+     user.
+3. Append this line to the end of `TTMenu/YSMenu.ini` **once**: `;MACRO_PAD` + 300 spaces + CRLF.
+   - When the menu changes the `AUTO_BOOT` value it takes the length difference out of this line, so the file size
+     stays the same. The file is written in place (`r+b`) and the file allocation table (FAT) is never touched.
+   - If `YSMenu.ini` has no `AUTO_BOOT=` line, add one together with the user first.
+4. Build the menu and copy it as `main.srldr`: `/_nds/TWiLightMenu/main.srldr`.
+5. For GBA: `/_nds/GBARunner2_arm7dldi_ds.nds`. This is GBARunner2's DS (arm7 DLDI) build; it also needs a GBA BIOS,
+   see the GBARunner2 docs.
+6. For GB/GBC: `/_nds/TWiLightMenu/emulators/gameyob.nds` (from the TWiLight Menu++ package).
 
-**Kart YSMenu tabanlı değilse:** NDS oyunlarını açma yolu farklı olur. Seçenekler:
-- kartın kendi çekirdeğinin bir "otomatik başlat" ayarı;
-- TWiLight Menu++'ın nds-bootstrap'i;
-- çekirdeğin argv ile ROM yolunu kabul etmesi.
+**If the cart is not YSMenu-based:** NDS games are launched differently. Options:
+- an "auto boot" setting of the cart's own kernel;
+- TWiLight Menu++'s nds-bootstrap;
+- the kernel accepting the ROM path through argv.
 
-Kullanıcının kartında deneyerek belirle. `launchGame()` ve `setAutoBoot()` fonksiyonlarını buna göre uyarla.
-Ayarlar `source/_part1.txt` başındaki `#define`'larda:
+Find out by testing on the user's cart. Adapt `launchGame()` and `setAutoBoot()` accordingly.
+The settings are the `#define`s at the top of `source/_part1.txt`:
 
 ```c
 #define NDS_DIR         "fat:/01 - Games"
@@ -185,246 +197,254 @@ Ayarlar `source/_part1.txt` başındaki `#define`'larda:
 #define GAMEYOB         "fat:/_nds/TWiLightMenu/emulators/gameyob.nds"
 ```
 
-### 3. Resimleri üret, derle, test et, kur
+### 3. Generate artwork, build, test, install
 
-**Önce iki şablon resmi hazırla.** Telif nedeniyle depoda yoklar ama `make_assets.py` için şart:
+**First prepare two template images.** They are not in the repository for copyright reasons, but `make_assets.py`
+needs them:
 
-| Dosya | Ne | Nereden |
+| File | What | Where from |
 |---|---|---|
-| `tools/carts/CPUE.png` | DS kart kabuğu ve "NINTENDO DS" bandı şablonu (Pokémon Platinum kartı) | `https://art.gametdb.com/ds/cart/US/CPUE.png` |
-| `tools/photos/gba_cart.png` | GBA kartuş kabuğu (etiket alanı kesilip atılır, herhangi bir GBA oyunu olur) | Kullanıcının kendi çektiği düz, önden fotoğraf veya kullanıcının onayladığı bir ürün fotoğrafı (~400×240, beyaz zemin) |
+| `tools/carts/CPUE.png` | DS card shell and "NINTENDO DS" band template (Pokémon Platinum card) | `https://art.gametdb.com/ds/cart/US/CPUE.png` |
+| `tools/photos/gba_cart.png` | GBA cartridge shell (the label area is cut out, so any GBA game works) | A flat front photo the user takes, or a product photo the user approves (~400×240, white background) |
 
-İndirmeden önce kullanıcıdan izin al.
+Ask the user for permission before downloading.
 
-Sırayla (Windows, proje kökünde; `F:` kullanıcının SD sürücüsü):
+Then, in order (Windows, project root; `F:` is the user's SD drive):
 
 ```
-python tools/make_assets.py . "F:/GBA/gba;F:/GB"            # yazı tipleri, kabuklar, GBA/GB etiketleri -> source/assets.c/.h
-python tools/nds_labels.py . "F:/01 - Games"                 # NDS kart etiketleri -> sdroot/_macro/labels
-python tools/hero.py . "F:/01 - Games" "F:/GBA/gba" "F:/GB"  # üst ekran arka planları -> sdroot/_macro/hero
-python tools/assemble_dual.py                                # source/*.txt parçaları -> source/main.c
-wsl -d Ubuntu -u root -- bash /mnt/c/.../build.sh           # BlocksDS ile derle -> dualDS.nds
+python tools/make_assets.py . "F:/GBA/gba;F:/GB"            # fonts, shells, GBA/GB labels -> source/assets.c/.h
+python tools/nds_labels.py . "F:/01 - Games"                 # NDS card labels -> sdroot/_macro/labels
+python tools/hero.py . "F:/01 - Games" "F:/GBA/gba" "F:/GB"  # top-screen backgrounds -> sdroot/_macro/hero
+python tools/assemble_dual.py                                # source/*.txt parts -> source/main.c
+wsl -d Ubuntu -u root -- bash /mnt/c/.../build.sh           # build with BlocksDS -> dualDS.nds
 ```
 
-Sonra:
-- melonDS'te test et ([melonDS ile test](#melonds-ile-test)), ekran görüntüsünü kullanıcıya göster, onay al.
-- Kur:
+Then:
+- Test in melonDS ([Testing with melonDS](#testing-with-melonds)), show the user screenshots, get approval.
+- Install:
   - `dualDS.nds` → `SD:/_nds/TWiLightMenu/main.srldr`
   - `sdroot/_macro/labels/*` → `SD:/_macro/labels/`
   - `sdroot/_macro/hero/*.bgb` → `SD:/_macro/hero/`
-- `tools/sd/verify_card.py` ile doğrula.
+- Verify with `tools/sd/verify_card.py`.
 
-### 4. Çalışma tarzı (bu projede iyi sonuç verdi)
+### 4. Way of working (this worked well in this project)
 
-- Kullanıcıya her görsel değişikliği **önce göster**: melonDS ekran görüntüsü veya önizleme PNG'si.
-- Tasarımda kullanıcı beğenmezse 3–4 seçenek üret, yan yana göster, seçtir.
-- Performansı ölç, tahmin etme: test derlemesinde `#define MACRO_PERF` kare sürelerini ekrana yazar.
-- Karta sadece değişen dosyaları yaz. Her yazımdan sonra ham okuma ile doğrula.
+- **Show** every visual change to the user first: a melonDS screenshot or a preview PNG.
+- If the user does not like a design, produce 3–4 options side by side and let them choose.
+- Measure performance, don't guess: in a test build `#define MACRO_PERF` prints frame times on screen.
+- Write only changed files to the card. Verify each write with a raw read.
 
 ---
 
-## Nasıl çalışıyor (mimari)
+## How it works (architecture)
 
-| Parça | Görev |
+| Part | Role |
 |---|---|
-| **Alt ekran** (ana motor, 3B) | Kartuş halkası: GL2D + videoGL. Her kartuş = kabuk dokusu + etiket dokusu. `lcdMainOnBottom()` ile 3B motor alt ekranda. |
-| **Üst ekran** (alt motor, 16 bit bitmap) | Vitrin sayfası işlemcide çizilir (`fb[]`). Yeni sayfa arka tamponda 8 yarım aşamada çizilir, sonra donanım parlaklığıyla geçilir. |
-| **NDS başlatma** | `YSMenu.ini` → `AUTO_BOOT` yerinde güncellenir, `ysmenu.dat` (kartın orijinal çekirdeği) `runNdsFile` ile çalışır. |
-| **GBA / GB başlatma** | `runNdsFile(emülatör, {emülatör, rom})`: GBARunner2 / GameYob ROM yolunu argv'den alır. |
-| **Açılış** | Ekranlar anında siyaha çekilir. Kart okuma (`bootWork`) açılış animasyonunun karelerine dağıtılır: dosya listesi → her karede 2 oyunun başlığı/simgesi → her karede 2 etiket. |
-| **Bellek** | Dokular için VRAM A+B+D = 384 KB. Yazı tipleri ve kabuklar ~177 KB. NDS etiketi 64×64 (4 KB), GBA/GB etiketi 128×64 (8 KB). En fazla `MAX_LABELS` (48) etiket. |
-| **Okunan dosyalar** | Menü karta **hiç yazmaz**. Tek istisna `YSMenu.ini` içindeki `AUTO_BOOT` değeri; o da aynı boyutta, yerinde yazılır. |
+| **Bottom screen** (main engine, 3D) | Cartridge carousel: GL2D + videoGL. Each cartridge = shell texture + label texture. `lcdMainOnBottom()` puts the 3D engine on the bottom screen. |
+| **Top screen** (sub engine, 16-bit bitmap) | The showcase page is drawn by the CPU (`fb[]`). A new page is drawn into a back buffer in 8 half-stages, then switched with a hardware brightness fade. |
+| **Launching NDS** | `AUTO_BOOT` in `YSMenu.ini` is updated in place, then `ysmenu.dat` (the cart's original kernel) is run with `runNdsFile`. |
+| **Launching GBA / GB** | `runNdsFile(emulator, {emulator, rom})`: GBARunner2 / GameYob take the ROM path from argv. |
+| **Boot** | The screens go black immediately. Reading the card (`bootWork`) is spread over the boot animation's frames: file list → 2 games' titles/icons per frame → 2 labels per frame. |
+| **Memory** | VRAM A+B+D = 384 KB for textures. Fonts and shells ~177 KB. An NDS label is 64×64 (4 KB), a GBA/GB label 128×64 (8 KB). At most `MAX_LABELS` (48) labels. |
+| **Files read** | The menu **never writes** to the card. The only exception is the `AUTO_BOOT` value in `YSMenu.ini`, written in place at the same size. |
 
-Dosya biçimleri:
-- **`.lbl`:** 512 bayt palet (256 × RGB15) + 8192 bayt piksel (128×64, satır uzunluğu 128). NDS'de sol üst 64×64 kullanılır.
-- **`.bgb`:** 128×96 RGB15 bulanık arka plan; ekranda 2 kat büyütülür.
-- **`.hrb`:** Eski sürümden kalma büyük kapak; artık okunmuyor.
+File formats:
+- **`.lbl`:** 512-byte palette (256 × RGB15) + 8192 bytes of pixels (128×64, row length 128). For NDS the top-left 64×64
+  is used.
+- **`.bgb`:** 128×96 RGB15 blurred background; shown at 2× on screen.
+- **`.hrb`:** Large cover left over from an older version; no longer read.
 
-## SD karttaki klasör yapısı ve dosya adları
+## SD card layout and file names
 
 ```
 SD:/
-├── R4.dat                       # TWiLight Autoboot (menüyü açar)
-├── TTMenu.dat, TTMenu/          # kartın YSMenu dosyaları (YSMenu.ini burada)
-├── 01 - Games/                  # NDS oyunları
+├── R4.dat                       # TWiLight Autoboot (starts the menu)
+├── TTMenu.dat, TTMenu/          # the cart's YSMenu files (YSMenu.ini is here)
+├── 01 - Games/                  # NDS games
 │   ├── 0002 - Pokemon Platinum Version.nds
 │   ├── 0002 - Pokemon Platinum Version.sav
 │   └── ...
-├── GBA/gba/                     # GBA oyunları
-│   ├── 0000-------Pokemon----------.gba   # "---" içeren dosya = bölüm ayırıcısı (oyun değil)
+├── GBA/gba/                     # GBA games
+│   ├── 0000-------Pokemon----------.gba   # a file with "---" = section separator (not a game)
 │   ├── 0001- Pokemon Fire Red Version.gba
 │   └── ...
-├── GB/                          # GB / GBC oyunları
+├── GB/                          # GB / GBC games
 │   └── Tetris.gb
 ├── _macro/
-│   ├── ysmenu.dat               # kartın orijinal R4.dat'ı (YSMenu çekirdeği)
-│   ├── labels/                  # kartuş etiketleri (.lbl)
-│   └── hero/                    # üst ekran arka planları (.bgb)
+│   ├── ysmenu.dat               # the cart's original R4.dat (YSMenu kernel)
+│   ├── labels/                  # cartridge labels (.lbl)
+│   └── hero/                    # top-screen backgrounds (.bgb)
 └── _nds/
     ├── GBARunner2_arm7dldi_ds.nds
     └── TWiLightMenu/
-        ├── main.srldr           # BU MENÜ (dualDS.nds)
+        ├── main.srldr           # THIS MENU (dualDS.nds)
         └── emulators/gameyob.nds
 ```
 
-Kurallar:
-- **Sıralama dosya adına göredir.** Numaralı adlar (`0001 - …`) düzeni sağlar. Aynı seriden oyunları yan yana numarala
-  (ör. tüm Pokémon'lar 0002–0006).
-- **Görünen ad:** NDS'de oyunun kendi başlığından (ROM banner'ı), GBA/GB'de dosya adından gelir. Dosya adındaki baştaki
-  numara ve tireler atılır.
-- **Etiket eşleşmesi:**
-  - NDS etiketi dosya adının kendisiyle eşleşir: `0011 - Mario Kart DS.nds` → `0011 - Mario Kart DS.lbl`.
-  - GBA/GB etiketi temizlenmiş adla eşleşir: `0001- Pokemon Fire Red Version.gba` → `Pokemon Fire Red Version.lbl`.
-- **Oyun dosyasını yeniden adlandırınca** aynı adlı `.sav`, `.lbl` ve `.bgb` dosyalarını da adlandır. Ayrıca
-  `tools/nds_codes.json`'u ve `YSMenu.ini`'deki `AUTO_BOOT`'u (aynı uzunlukta kalacak şekilde) güncelle.
+Rules:
+- **Order follows the file name.** Numbered names (`0001 - …`) keep things in order. Number games of the same series
+  next to each other (e.g. all Pokémon games 0002–0006).
+- **Displayed title:** for NDS it comes from the game's own title (ROM banner), for GBA/GB from the file name. The
+  leading number and dashes are stripped from the file name.
+- **Label matching:**
+  - An NDS label matches the file name itself: `0011 - Mario Kart DS.nds` → `0011 - Mario Kart DS.lbl`.
+  - A GBA/GB label matches the cleaned title: `0001- Pokemon Fire Red Version.gba` → `Pokemon Fire Red Version.lbl`.
+- **When you rename a game file,** rename its `.sav`, `.lbl` and `.bgb` too. Also update `tools/nds_codes.json` and the
+  `AUTO_BOOT` line in `YSMenu.ini` (keeping the same length).
 
-## Oyun ekleme ve resimler
+## Adding games and artwork
 
-### NDS oyunu
+### NDS game
 
-1. ROM'u `01 - Games/` klasörüne numaralı adla koy.
-2. Oyun kodunu bul. ROM başlığında `0x0C` konumundaki 4 harf (ör. `AMCE`). Claude bunu yalnızca ilk 16 baytı okuyarak
-   yapar.
-3. `tools/nds_codes.json` dosyasına ekle: `"0011 - Mario Kart DS.nds": "AMCE"`.
-4. Resimleri indir (GameTDB):
-   - **Gerçek kart fotoğrafı:** `https://art.gametdb.com/ds/cart/US/<KOD>.png` → `tools/carts/<KOD>.png`
-   - **Kapak:** `https://art.gametdb.com/ds/coverM/US/<KOD>.jpg` → `tools/covers/<KOD>.jpg`
-   - `US` yoksa `EN`, `EU` dene. Kodun son harfi bölgedir: `E` ABD, `P` Avrupa, `J` Japonya.
-5. `python tools/nds_labels.py . "F:/01 - Games"` ve `python tools/hero.py ...` çalıştır.
+1. Put the ROM in `01 - Games/` with a numbered name.
+2. Find the game code: the 4 letters at offset `0x0C` in the ROM header (e.g. `AMCE`). Claude does this by reading only
+   the first 16 bytes.
+3. Add it to `tools/nds_codes.json`: `"0011 - Mario Kart DS.nds": "AMCE"`.
+4. Download the artwork (GameTDB):
+   - **Real card photo:** `https://art.gametdb.com/ds/cart/US/<CODE>.png` → `tools/carts/<CODE>.png`
+   - **Cover:** `https://art.gametdb.com/ds/coverM/US/<CODE>.jpg` → `tools/covers/<CODE>.jpg`
+   - If `US` is missing, try `EN` or `EU`. The last letter of the code is the region: `E` USA, `P` Europe, `J` Japan.
+5. Run `python tools/nds_labels.py . "F:/01 - Games"` and `python tools/hero.py ...`.
 
-Nasıl seçilir:
-- `tools/carts/<KOD>.png` **varsa** etiket gerçek kart fotoğrafından kesilir. Bu en iyi sonuçtur.
-- **Yoksa** etiket aynı düzenle üretilir: üst beyaz bant ve logo, kapak resmi, ESRB / Nintendo / mühür, `NTR-KOD-USA`.
-- Logosu kapağın altında olan oyunlarda (logo ESRB/mührün altında kalıyorsa) kodu `nds_labels.py` içindeki `FIT` ve
-  `BOTTOM` kümelerine ekle. Resim küçültülüp yukarı alınır, yanlar bulanık arka planla dolar.
-- Önizleme için `python tools/preview_all.py .` → `tools/_all.png`. Kullanıcıya bunu göster.
+How the label is chosen:
+- **If** `tools/carts/<CODE>.png` exists, the label is cut from the real card photo. This gives the best result.
+- **Otherwise** a label is generated in the same layout: white top band and logo, cover art, ESRB / Nintendo / seal,
+  `NTR-CODE-USA`.
+- For games whose logo is at the bottom of the cover (where it would sit under the ESRB box or seal), add the code to
+  the `FIT` and `BOTTOM` sets in `nds_labels.py`. The art is shrunk and moved up; the sides are filled with a blurred
+  background.
+- Preview: `python tools/preview_all.py .` → `tools/_all.png`. Show this to the user.
 
-### GBA / GB oyunu
+### GBA / GB game
 
-Etiketler kartuş **fotoğraflarından** yapılır. `tools/make_assets.py` içindeki `PHOTO` sözlüğüne bir satır ekle:
+Labels are made from cartridge **photos**. Add a line to the `PHOTO` dictionary in `tools/make_assets.py`:
 
 ```python
 "mario kart super circuit": ("photos/8.png", ("compose", 60, 30, 408, 138, 1.04, 175, 135, 345, 200), [...]),
 "tetris": ("tetris_cart_photo.png", ("crop", 72, 122, 268, 306), []),
 ```
 
-- **Anahtar:** Oyunun temizlenmiş adının başı, küçük harf.
-- **Kırpma modları:**
-  - `crop`: doğrudan kırpar.
-  - `fit`: resmin tamamını sığdırır.
-  - `focus`: bir odak kutusunun çevresinden alır.
-  - `compose`: logoyu temiz bir zemin üzerine yerleştirir.
-- **Silme listesi:** ESRB, mühür gibi küçük artıkları çevredeki renkle örter.
-- **Fotoğraf yoksa** `ART` sözlüğüne renk ve başlık verilerek çizim etiket üretilir.
-- Sonra `python tools/make_assets.py . "F:/GBA/gba;F:/GB"` ve `hero.py` çalıştır, menüyü yeniden derle (GBA/GB kabukları
-  `assets.c` içinde).
+- **Key:** the start of the game's cleaned title, lower case.
+- **Crop modes:**
+  - `crop`: crops directly.
+  - `fit`: fits the whole image.
+  - `focus`: takes the area around a focus box.
+  - `compose`: places the logo on a clean background.
+- **Erase list:** covers small leftovers such as ESRB or the seal with the surrounding colour.
+- **Without a photo,** a drawn label is generated from the `ART` dictionary (colours and title).
+- Then run `python tools/make_assets.py . "F:/GBA/gba;F:/GB"` and `hero.py`, and rebuild the menu (the GBA/GB shells
+  live in `assets.c`).
 
-Kullanıcı kendi kartuşunun fotoğrafını çekebilir: düz, iyi ışıkta, etiket tam görünecek şekilde. Claude kırpma
-koordinatlarını fotoğrafa bakarak ayarlar ve önizlemeyi gösterir.
+The user can photograph their own cartridge: flat, in good light, with the whole label visible. Claude adjusts the
+crop coordinates by looking at the photo and shows a preview.
 
-## Menü dilini değiştirme
+## Changing the menu language
 
-Metinler kodun içinde:
-- `source/_ui_dual.txt`: bölüm adları (`tabLong`), ipuçları, uyarılar, "Kayıt var", gün/ay adları (`gun[]`, `ay[]`).
-- `source/_part3.txt`: açılış ve hata ekranları.
+The texts are in the code:
+- `source/_ui_dual.txt`: section names (`tabLong`), hints, warnings, "Kayıt var" (save present), day/month names
+  (`gun[]`, `ay[]`).
+- `source/_part3.txt`: boot and error screens.
 
-`grep` ile Türkçe karakter içeren dizgileri bul (`çğıöşü`); çeviri listesini kullanıcıya onaylat.
+Find the strings with Turkish characters (`çğıöşü`) using `grep`; have the user approve the translation list.
 
-Yazı tipi yalnızca `tools/make_assets.py` içindeki `CHARS` listesindeki karakterleri içerir:
+The font only contains the characters in the `CHARS` list in `tools/make_assets.py`:
 
 ```python
 CHARS = [chr(c) for c in range(32, 127)] + list("ÇĞİÖŞÜçğıöşü•éÉèêëáàâäíìîïóòôúùûñ™®©")
 ```
 
-- Yeni dilin özel harflerini (ör. `ßäöü`, `ąęłńśźż`, `ãõç`) buraya ekle ve `make_assets.py`'yi yeniden çalıştır.
-- Japonca/Çince gibi büyük karakter setleri bu bitmap yazı tipi yöntemine sığmaz. Kullanıcıya söyle.
-- Bitmap yazı tipi Windows'taki Segoe UI'dan üretilir (`C:/Windows/Fonts`). Linux/macOS'ta açık bir yazı tipiyle
-  (ör. Noto Sans) değiştir.
+- Add the special letters of the new language (e.g. `ßäöü`, `ąęłńśźż`, `ãõç`) here and run `make_assets.py` again.
+- Large character sets such as Japanese or Chinese do not fit this bitmap font approach. Tell the user.
+- The bitmap font is generated from Segoe UI on Windows (`C:/Windows/Fonts`). On Linux/macOS, switch to an open font
+  (e.g. Noto Sans).
 
-## Derleme ortamı
+## Build environment
 
-- **Windows + WSL (Ubuntu)** içinde **BlocksDS**:
-  - `/opt/blocksds/core`, araç zinciri `/opt/wonderful`.
-  - Kurulum: <https://blocksds.skylyrac.net/docs/setup/>.
-- **Python 3 + Pillow** (Windows tarafında): `pip install pillow`.
+- **BlocksDS** inside **Windows + WSL (Ubuntu)**:
+  - `/opt/blocksds/core`, toolchain in `/opt/wonderful`.
+  - Setup: <https://blocksds.skylyrac.net/docs/setup/>.
+- **Python 3 + Pillow** (on the Windows side): `pip install pillow`.
 - `build.sh`:
-  - Projeyi `/root/work/dualds`'a kopyalar.
-  - `bootloader/` (nds-bootloader, GPL) derler ve `load.bin`'i C dizisine çevirir.
-  - `arm7/` ve ana programı derler.
-  - `dualDS.nds`'i proje köküne koyar.
-- `source/main.c` elle düzenlenmez. `tools/assemble_dual.py` onu şu parçalardan üretir:
-  `_part1.txt`, `_io_dual.txt`, `_part3.txt` (kartuş/arka plan/açılış), `_ui_dual.txt`.
-- `source/assets.c/.h` da üretilen dosyalardır (`make_assets.py`).
+  - copies the project to `/root/work/dualds`;
+  - builds `bootloader/` (nds-bootloader, GPL) and turns `load.bin` into a C array;
+  - builds `arm7/` and the main program;
+  - puts `dualDS.nds` in the project root.
+- `source/main.c` is not edited by hand. `tools/assemble_dual.py` generates it from these parts:
+  `_part1.txt`, `_io_dual.txt`, `_part3.txt` (cartridges/background/boot), `_ui_dual.txt`.
+- `source/assets.c/.h` are generated files too (`make_assets.py`).
 
-## melonDS ile test
+## Testing with melonDS
 
-1. melonDS'te **DLDI / SD kart klasörü** ayarla (Config → Emulation settings → DLDI). "Sync SD to folder" ile test
-   klasörünü göster.
-2. Test klasörünü gerçek kart gibi düzenle: `_macro/`, `01 - Games/` (birkaç küçük ROM), `GBA/gba/`, `GB/`.
-3. `dualDS.nds`'i melonDS ile doğrudan aç.
-   - NDS oyununu başlatmak emülatörde YSMenu çekirdeği gerektirir. Menü görünümü ve hız testi için gerekmez.
-4. Test derlemesi bayrakları (`main.c`'nin en başına):
-   - `#define MACRO_AUTOTEST`: menü kendi kendine sağa kaydırır ve bölüm değiştirir (ekran görüntüsü için).
-   - `#define MACRO_PERF`: kare sürelerini ve sayfa çizim aşamalarının süresini ekrana yazar.
-   - **Karta yazmadan önce bu satırları kaldır.**
+1. In melonDS set up the **DLDI / SD card folder** (Config → Emulation settings → DLDI). Point "Sync SD to folder" at
+   the test folder.
+2. Lay the test folder out like the real card: `_macro/`, `01 - Games/` (a few small ROMs), `GBA/gba/`, `GB/`.
+3. Open `dualDS.nds` directly in melonDS.
+   - Launching an NDS game in the emulator needs the YSMenu kernel. It is not needed for testing the menu's look and
+     speed.
+4. Test build flags (at the very top of `main.c`):
+   - `#define MACRO_AUTOTEST`: the menu scrolls right and switches sections by itself (for screenshots).
+   - `#define MACRO_PERF`: prints frame times and the duration of the page-drawing stages on screen.
+   - **Remove these lines before writing to the card.**
 
-## Kontroller
+## Controls
 
-| Tuş / dokunma | İşlev |
+| Button / touch | Action |
 |---|---|
-| ◀ ▶ (veya parmakla kaydırma) | Oyun seç |
-| A / ortadaki karta dokun | Oyunu başlat |
-| L / R / üstteki sekmeler | NDS – GBA – GB bölümü |
-| START | YSMenu'yü aç (kartın kendi menüsü) |
-| SELECT | Parlaklık 1–7 |
+| ◀ ▶ (or swipe) | Select game |
+| A / tap the middle card | Launch game |
+| L / R / tabs at the top | NDS – GBA – GB section |
+| START | Open YSMenu (the cart's own menu) |
+| SELECT | Brightness 1–7 |
 
-## Sorun giderme ve öğrendiklerimiz
+## Troubleshooting and lessons learned
 
-- **`fat:/_nds/TWiLightMenu/main.srldr not found`:** Dosya kayıp ya da klasör kaydı bozuk.
-  1. `raw_backup.py` ile yedek al.
-  2. `verify_card.py` ile incele.
-  - Bu projede bozuk bir okuyucu, klasörün dizin kümesine ve FAT'ın iki sektörüne USB paketi ("USBS…") yazmıştı.
-  - Çözüm: ezilen FAT sektörleri bitişik dosya zincirlerinden yeniden hesaplandı, dizin boş bir dizin olarak yeniden
-    yazıldı, dosyalar tekrar kopyalandı, iki FAT kopyası eşitlendi, sahipsiz kümeler boşaltıldı.
-  - Hepsi önce yedeğin kopyasında denendi, sonra karta uygulandı.
-- **Okuyucu büyük okumalarda hata veriyor (errno 22):** 64 KB parçalarla oku, hata olunca bekle ve aygıtı yeniden aç
-  (`raw_backup.py` bunu yapar).
-- **Windows "Warning / Dirty" diyor:** Açılış sektöründeki `0x41` baytının kirli bayrağı. Kart doğrulandıktan sonra
-  temizlenebilir. Rastgele chkdsk çalıştırma.
-- **Menü takılıyor / kasıyor:** Kare süresini `MACRO_PERF` ile ölç. Sık nedenler:
-  - üst ekranın tek karede çizilmesi;
-  - piksel başına yavaş renk karıştırma;
-  - açılışta çok dosya okuma.
-- **Etiketler bazı oyunlarda boş:** VRAM dolmuş olabilir. Etiket sayısını ve `MAX_LABELS`'ı kontrol et.
-- **Yeni oyunun etiketi yok:** `nds_codes.json`'a eklendi mi? Etiket adı oyun dosyasının adıyla birebir aynı mı?
+- **`fat:/_nds/TWiLightMenu/main.srldr not found`:** the file is missing or the folder record is corrupt.
+  1. Take a backup with `raw_backup.py`.
+  2. Inspect with `verify_card.py`.
+  - In this project a faulty reader had written USB packets ("USBS…") into the folder's directory cluster and into two
+    FAT sectors.
+  - Fix: the overwritten FAT sectors were recomputed from the contiguous file chains, the directory was rewritten as an
+    empty directory, the files were copied again, the two FAT copies were synced and orphaned clusters were freed.
+  - Everything was first tried on a copy of the backup, then applied to the card.
+- **The reader fails on large reads (errno 22):** read in 64 KB pieces; on error wait and reopen the device
+  (`raw_backup.py` does this).
+- **Windows says "Warning / Dirty":** the dirty flag in byte `0x41` of the boot sector. It can be cleared once the card
+  has been verified. Do not run chkdsk blindly.
+- **The menu stutters:** measure the frame time with `MACRO_PERF`. Common causes:
+  - drawing the whole top screen in a single frame;
+  - slow per-pixel colour blending;
+  - reading many files at boot.
+- **Some games have blank labels:** VRAM may be full. Check the label count and `MAX_LABELS`.
+- **A new game has no label:** was it added to `nds_codes.json`? Does the label name exactly match the game's file
+  name?
 
-## Kaynak dosyalar
+## Source files
 
-| Dosya | İçerik |
+| File | Contents |
 |---|---|
-| `source/_part1.txt` | Ayarlar, renkler, `Game` yapısı |
-| `source/_io_dual.txt` | Kart okuma: oyun tarama, NDS başlığı, etiket ve arka plan yükleme |
-| `source/_part3.txt` | 3B kartuş çizimi, zemin/yansıma, açılış animasyonu |
-| `source/_ui_dual.txt` | Üst ekran vitrini, menü döngüsü, oyun başlatma, `main()` |
-| `tools/make_assets.py` | Yazı tipleri, logo, kartuş kabukları, GBA/GB etiketleri |
-| `tools/nds_labels.py` | NDS kart etiketleri (gerçek kart fotoğrafı veya kapaktan) |
-| `tools/hero.py` | Üst ekran bulanık arka planları |
-| `tools/assemble_dual.py` | Parçaları `main.c`'de birleştirir |
-| `tools/preview_all.py` | Tüm NDS kartlarının önizleme tablosu |
-| `tools/sd/raw_backup.py` | SD kartın ham yedeği (salt okunur) |
-| `tools/sd/verify_card.py` | Karttan ham okuyarak doğrulama |
-| `bootloader/`, `arm7/` | NDS dosyası başlatıcı (nds-bootloader) ve ARM7 kodu |
+| `source/_part1.txt` | Settings, colours, `Game` struct |
+| `source/_io_dual.txt` | Card reading: game scan, NDS banner, label and background loading |
+| `source/_part3.txt` | 3D cartridge drawing, floor/reflection, boot animation |
+| `source/_ui_dual.txt` | Top-screen showcase, menu loop, game launching, `main()` |
+| `tools/make_assets.py` | Fonts, logo, cartridge shells, GBA/GB labels |
+| `tools/nds_labels.py` | NDS card labels (from a real card photo or the cover) |
+| `tools/hero.py` | Top-screen blurred backgrounds |
+| `tools/assemble_dual.py` | Joins the parts into `main.c` |
+| `tools/preview_all.py` | Preview sheet of all NDS cards |
+| `tools/sd/raw_backup.py` | Raw backup of the SD card (read-only) |
+| `tools/sd/verify_card.py` | Verification by reading raw from the card |
+| `bootloader/`, `arm7/` | NDS file launcher (nds-bootloader) and ARM7 code |
 
-## Teşekkür ve lisanslar
+## Credits and licenses
 
-- [BlocksDS](https://github.com/blocksds/sdk): NDS geliştirme ortamı.
-- [TWiLight Menu++](https://github.com/DS-Homebrew/TWiLightMenu): Autoboot dosyaları, GameYob paketi, nds-bootloader.
-- [GBARunner2](https://github.com/Gericom/GBARunner2): DS'te GBA oyunları.
-- GameYob: GB/GBC emülatörü.
-- YSMenu: kartın çekirdeği. Bu depoda **yer almaz**, kullanıcının kendi kartından gelir.
-- [GameTDB](https://www.gametdb.com): kapak ve kart görselleri. Görseller kullanıcı tarafından indirilir, bu depoda
-  yer almaz.
-- `bootloader/` ve `COPYING`: GNU GPL v2.
+- [BlocksDS](https://github.com/blocksds/sdk): NDS development kit.
+- [TWiLight Menu++](https://github.com/DS-Homebrew/TWiLightMenu): Autoboot files, the GameYob package, nds-bootloader.
+- [GBARunner2](https://github.com/Gericom/GBARunner2): GBA games on DS.
+- GameYob: GB/GBC emulator.
+- YSMenu: the cart's kernel. **Not included** in this repository; it comes from the user's own cart.
+- [GameTDB](https://www.gametdb.com): cover and card artwork. The artwork is downloaded by the user and is not
+  included in this repository.
+- `bootloader/` and `COPYING`: GNU GPL v2.
 
-Nintendo, Nintendo DS, Game Boy ve oyun adları sahiplerinin ticari markalarıdır. Bu proje Nintendo ile bağlantılı
-değildir. Sadece yasal olarak sahip olduğunuz oyunların yedekleriyle kullanın.
+Nintendo, Nintendo DS, Game Boy and the game titles are trademarks of their respective owners. This project is not
+affiliated with Nintendo. Use it only with backups of games you legally own.
