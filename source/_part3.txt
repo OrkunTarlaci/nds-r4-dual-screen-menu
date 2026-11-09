@@ -1,0 +1,918 @@
+
+// ------------------------------------------------------------------ 3B kartus
+typedef struct { float x, y, z, ry, rx, rz, s; } Pose;
+
+// Kartus turune gore geometri. Doku pikseli -> yerel birim: 64 px = 1, doku merkezi = (0, 0)
+typedef struct {
+    const glImage *shell;
+    float texW;                         // doku genisligi (piksel)
+    float bx0, by0, bx1, by1;           // kabugun dokudaki kutusu (piksel) - sadece bu kisim cizilir
+    float lx0, ly0, lx1, ly1, bottom;   // etiket ve alt kenar (yerel birim)
+    u16 tint; int lw; int clear;
+} CartGeo;
+
+static u16 mulColor(u16 a, u16 b)
+{
+    return RGB15((a & 31) * (b & 31) / 31, ((a >> 5) & 31) * ((b >> 5) & 31) / 31, ((a >> 10) & 31) * ((b >> 10) & 31) / 31);
+}
+
+static CartGeo cartGeo(const Game *g)
+{
+    CartGeo c;
+    if (g->type == T_GBA) {
+        c.shell = cartImg;
+        c.texW = CART_TEX_W;
+        c.bx0 = CART_BODY_X0; c.by0 = CART_BODY_Y0; c.bx1 = CART_BODY_X1; c.by1 = CART_BODY_Y1;
+        c.lx0 = (CART_LABEL_X - CART_TEX_W / 2) / 64.0f; c.lx1 = c.lx0 + CART_LABEL_W / 64.0f;
+        c.ly0 = 1 - CART_LABEL_Y / 64.0f;  c.ly1 = c.ly0 - CART_LABEL_H / 64.0f;
+        c.bottom = 1 - CART_BODY_Y1 / 64.0f;
+        c.tint = C_WHITE;
+        c.lw = CART_LABEL_W;
+        c.clear = 0;
+    } else {
+        c.shell = gbCartImg;     // tum Game Boy / Color oyunlari ayni duzgun kabuk (renk oyuna gore)
+        c.texW = 128;
+        c.bx0 = GB_BODY_X0; c.by0 = GB_BODY_Y0; c.bx1 = GB_BODY_X1; c.by1 = GB_BODY_Y1;
+        c.lx0 = -1 + GB_LABEL_X / 64.0f; c.lx1 = c.lx0 + GB_LABEL_W / 64.0f;
+        c.ly0 = 1 - GB_LABEL_Y / 64.0f;  c.ly1 = c.ly0 - GB_LABEL_H / 64.0f;
+        c.bottom = 1 - GB_BOTTOM / 64.0f;
+        c.tint = g->shell;      // plastik rengi (oyuna gore)
+        c.clear = g->clear;
+        c.lw = GB_LABEL_W;
+    }
+    return c;
+}
+#define THICK 0.16f                     // kartus kalinligi
+
+// Dokusuz renkli dortgen (yerel koordinat)
+static void quadColor(float x0, float yT, float x1, float yB, float z, u16 cT, u16 cB)
+{
+    glBindTexture(0, 0);
+    glBegin(GL_QUADS);
+    glColor(cT); glVertex3v16(floattov16(x0), floattov16(yT), floattov16(z));
+    glColor(cB); glVertex3v16(floattov16(x0), floattov16(yB), floattov16(z));
+    glVertex3v16(floattov16(x1), floattov16(yB), floattov16(z));
+    glColor(cT); glVertex3v16(floattov16(x1), floattov16(yT), floattov16(z));
+    glEnd();
+}
+
+// Dort koseli serbest yuzey (kalinlik kenarlari)
+static void face(float ax, float ay, float az, float bx, float by, float bz,
+                 float cx, float cy, float cz, float dx, float dy, float dz, u16 c1, u16 c2)
+{
+    glBindTexture(0, 0);
+    glBegin(GL_QUADS);
+    glColor(c1); glVertex3v16(floattov16(ax), floattov16(ay), floattov16(az));
+    glVertex3v16(floattov16(bx), floattov16(by), floattov16(bz));
+    glColor(c2); glVertex3v16(floattov16(cx), floattov16(cy), floattov16(cz));
+    glVertex3v16(floattov16(dx), floattov16(dy), floattov16(dz));
+    glEnd();
+}
+
+// Yansima: zemin cizgisinde 'top' renginde baslar, REFL_LEN kadar asagida zemin rengine erir
+#define REFL_LEN 0.55f
+static u16 reflBg = RGB15(2, 2, 5);
+static u16 reflAt(u16 top, float y, float f)
+{
+    return mixColor(top, reflBg, clampf((f - y) / REFL_LEN, 0, 1));
+}
+
+// Dokunun bir dikdortgen parcasini cizer (u/v: dokuda 0..1)
+static void quadUV(const glImage *img, float x0, float yT, float x1, float yB, float z,
+                   u16 cT, u16 cB, float fu0, float fv0, float fu1, float fv1)
+{
+    int u0 = img->u_off + (int)(img->width * fu0 + 0.5f), u1 = img->u_off + (int)(img->width * fu1 + 0.5f);
+    int v0 = img->v_off + (int)(img->height * fv0 + 0.5f), v1 = img->v_off + (int)(img->height * fv1 + 0.5f);
+    v16 X0 = floattov16(x0), X1 = floattov16(x1), YT = floattov16(yT), YB = floattov16(yB), Z = floattov16(z);
+    glBindTexture(0, img->textureID);
+    glBegin(GL_QUADS);
+    glColor(cT); glTexCoord2t16(inttot16(u0), inttot16(v0)); glVertex3v16(X0, YT, Z);
+    glColor(cB); glTexCoord2t16(inttot16(u0), inttot16(v1)); glVertex3v16(X0, YB, Z);
+    glTexCoord2t16(inttot16(u1), inttot16(v1)); glVertex3v16(X1, YB, Z);
+    glColor(cT); glTexCoord2t16(inttot16(u1), inttot16(v0)); glVertex3v16(X1, YT, Z);
+    glEnd();
+}
+static void quad3part(const glImage *img, float x0, float yT, float x1, float yB, float z,
+                      u16 cT, u16 cB, float t0, float t1)
+{
+    quadUV(img, x0, yT, x1, yB, z, cT, cB, 0, t0, 1, t1);
+}
+
+// Kabugun sadece govde kutusunu ciz (bos/saydam doku alanlari cizilmez -> DS'in satir butcesi korunur)
+static void shellQuad(const CartGeo *g, float z, u16 cT, u16 cB)
+{
+    float L = (g->bx0 - g->texW / 2) / 64.0f, R = (g->bx1 - g->texW / 2) / 64.0f;
+    float T = 1 - g->by0 / 64.0f, Bm = 1 - g->by1 / 64.0f;
+    quadUV(g->shell, L, T, R, Bm, z, cT, cB, g->bx0 / g->texW, g->by0 / 128.0f, g->bx1 / g->texW, g->by1 / 128.0f);
+}
+
+static void cart3D(const Game *g, Pose p, u16 col, int a, float shine, int refl)
+{
+    if (a <= 0) return;
+    glPushMatrix();
+    glTranslatef32(floattof32(p.x), floattof32(p.y), floattof32(p.z));
+    if (p.rz != 0) glRotateZi(deg(p.rz));
+    glRotateYi(deg(p.ry));
+    if (p.rx != 0) glRotateXi(deg(p.rx));
+    glScalef32(floattof32(p.s), floattof32(p.s), floattof32(p.s));
+
+    CartGeo geo = cartGeo(g);
+    float floorY = geo.bottom;
+    u16 shellCol = mulColor(col, geo.tint);
+    // isik: kartus yana dondukce on yuz kararir, kenarlar parlar
+    float c = fabsf(cosf_(p.ry * 0.0174533f));
+    u16 front = mixColor(col, C_BLACK, (1 - c) * 0.45f);              // etiket
+    u16 sFront = mixColor(shellCol, C_BLACK, (1 - c) * 0.45f);        // kabuk on yuz
+    u16 frontB = sFront;
+    int clr = geo.clear;                                               // seffaf plastik
+    float L = (geo.bx0 - geo.texW / 2) / 64.0f + 0.03f, R = (geo.bx1 - geo.texW / 2) / 64.0f - 0.03f;
+    float T = 1 - geo.by0 / 64.0f - 0.02f, Bm = 1 - geo.by1 / 64.0f + 0.02f;
+
+    // arka yuz + dort ince kenar (eskiden 7 tam katman: gercek DS'te satir tasmasina yol aciyordu)
+    if (a >= 31) {
+        u16 back = mixColor(shellCol, C_BLACK, 0.55f);
+        u16 sideA = mixColor(shellCol, C_BLACK, 0.35f + 0.25f * c);
+        u16 sideB = mixColor(sideA, C_BLACK, 0.35f);
+        int sa = clr ? 9 : 31;
+        if (c < 0.5f) {
+            alpha(sa);
+            shellQuad(&geo, -THICK, back, back);
+        }
+        alpha(sa);
+        face(L, T, 0, L, Bm, 0, L, Bm, -THICK, L, T, -THICK, sideA, sideB);
+        alpha(sa);
+        face(R, T, 0, R, Bm, 0, R, Bm, -THICK, R, T, -THICK, sideA, sideB);
+        // ust kenar yuzu cizilmez: kartusun ust hatti basamakli/cikintili, duz bir yuzey ustunde havada kaliyordu
+        alpha(sa);
+        face(L, Bm, 0, R, Bm, 0, R, Bm, -THICK, L, Bm, -THICK, sideB, sideB);
+    }
+    alpha(clr ? a * 14 / 31 : a);
+    shellQuad(&geo, 0, sFront, frontB);
+
+    float lx0 = geo.lx0, lx1 = geo.lx1, ly0 = geo.ly0, ly1 = geo.ly1;
+    alpha(a);
+    if (g->label >= 0) quad3(labelImg[g->label], lx0, ly0, lx1, ly1, 0.006f, front, front, 0);
+    else quadColor(lx0, ly0, lx1, ly1, 0.006f, mixColor(g->c1, C_BLACK, (1 - c) * 0.5f), mixColor(g->c2, C_BLACK, (1 - c) * 0.5f));
+
+    // egik isik seridi (parlak etiket hissi)
+    if (0 && shine > 0 && shine < 1 && a >= 31) {
+        float w = lx1 - lx0;
+        float sx = lx0 - 0.25f + (w + 0.3f) * shine;
+        int sa = (int)(10 * sinf_(shine * 3.14159f));
+        if (sa > 0) {
+            alpha(sa);
+            quad3skew(dotImg, sx - 0.10f, ly0, sx + 0.10f, ly1, 0.22f, 0.012f, C_WHITE);
+        }
+    }
+
+    // zemindeki kisa yansima (arka plan rengine erir)
+    if (refl > 0) {
+        u16 rt = mixColor(col, C_BLACK, 0.30f);
+        u16 rs = mixColor(shellCol, C_BLACK, 0.30f);
+        float f = floorY, yEnd = f - REFL_LEN;
+        float L0 = (geo.bx0 - geo.texW / 2) / 64.0f, R0 = (geo.bx1 - geo.texW / 2) / 64.0f;
+        // kabuk: zemin satirindan yukari dogru REFL_LEN kadarlik dilim, ters
+        alpha(clr ? refl / 2 : refl);
+        quadUV(geo.shell, L0, f, R0, yEnd, 0, rs, reflBg, geo.bx0 / geo.texW, (1 - f) / 2,
+               geo.bx1 / geo.texW, (1 - f - REFL_LEN) / 2);
+        float yT = 2 * f - ly1, yB = 2 * f - ly0;
+        if (yB < yEnd) yB = yEnd;
+        if (yT > yB) {
+            float tB = (yB - 2 * f + ly0) / (ly0 - ly1);   // 1 = etiketin alt satiri
+            alpha(refl);
+            if (g->label >= 0)
+                quad3part(labelImg[g->label], lx0, yT, lx1, yB, 0.006f, reflAt(rt, yT, f), reflAt(rt, yB, f), 1, tB);
+            else
+                quadColor(lx0, yT, lx1, yB, 0.006f, reflAt(g->c2, yT, f), reflAt(g->c1, yB, f));
+        }
+    }
+    glPopMatrix(1);
+}
+
+// Kaydirma seridindeki bir yuvanin duzeni (off: ortadan uzaklik, kesirli olabilir)
+static Pose slotPose(float off)
+{
+    Pose p;
+    float ao = fabsf(off), sg = off < 0 ? -1.0f : 1.0f;
+    float near = clampf(ao, 0, 1), far = clampf(ao - 1, 0, 4);
+    p.x = sg * (near * 2.05f + far * 0.85f);
+    p.z = -CAM_D - near * 1.45f - far * 0.60f;
+    p.y = CART_Y - near * 0.06f;
+    p.ry = -sg * near * 62.0f;
+    p.rx = 0;
+    p.rz = 0;
+    p.s = CART_S;
+    return p;
+}
+
+// ------------------------------------------------------------------ arka plan (koyu, oyunun rengine burunen)
+static u16 tintCur = RGB15(12, 16, 28);   // animasyonlu ortam rengi
+
+static float floorSy = 108;               // ortadaki kartusun zemin cizgisi (ekran y), animasyonlu
+#define FLOOR_SY ((int)floorSy)
+
+static float floorFor(const Game *g)
+{
+    float b = g->cover >= 0 ? -(g->coverH / 128.0f) : cartGeo(g).bottom;
+    return 96 - (CART_Y + b * CART_S) * CAM_F * 96 / CAM_D;
+}
+
+static void dust(float fade)
+{
+    // yavasca yukselen, parildayan toz parcaciklari (3 derinlik katmani)
+    for (int i = 0; i < 12; i++) {
+        u32 h = (u32)i * 2654435761u;
+        float depth = 0.35f + (h >> 28) / 16.0f * 0.65f;             // 0.35..1
+        float sp = 0.10f + 0.25f * depth;
+        float x = (float)((h >> 8) & 255);
+        float y = 192 - fmodf(((h >> 16) & 255) * 0.75f + frame * sp, 200.0f);
+        x += sinf_(frame / 90.0f + i) * 6 * depth;
+        int tw = (int)((5 + 6 * depth) * (0.6f + 0.4f * sinf_(frame / 23.0f + i * 1.7f)) * fade);
+        float s = 0.05f + 0.07f * depth;
+        sprite(dotImg, x, y, s, s, mixColor(C_WHITE, vivid(tintCur, 0.8f), 0.4f), tw);
+    }
+}
+
+// fade: ortam isiginin gucu (0 = bos uzay), glow: kartusun arkasindaki isik
+static void backdrop(float fade, float glow, float gx, float gy)
+{
+    u16 t = vivid(tintCur, 0.80f);
+    float T = frame / 60.0f;
+    u16 top = mixColor(C_BG0, t, 0.08f * fade);
+    u16 hor = mixColor(RGB15(1, 1, 4), t, 0.28f * fade);
+    reflBg = mixColor(hor, C_BG1, 0.35f);
+    u16 bot = mixColor(C_BG1, t, 0.05f * fade);
+    alpha(31);
+    glBoxFilledGradient(0, 0, 255, FLOOR_SY, top, hor, hor, top);
+    alpha(31);
+    glBoxFilledGradient(0, FLOOR_SY, 255, 191, hor, bot, bot, hor);
+
+    // aurora: yavasca suzulen buyuk renk bulutlari
+    (void)T;
+
+    // kartusun arkasindaki isik + zemine dusen isik havuzu
+    if (glow > 0) {
+        sprite(dotImg, gx, gy - 4, 6.0f, 3.6f, t, (int)(11 * glow));
+        sprite(dotImg, gx, FLOOR_SY + 2, 6.0f, 0.6f, mixColor(t, C_WHITE, 0.3f), (int)(12 * glow));
+    }
+    // ufuk cizgisi: ortada parlak, kenarlarda kaybolur
+    if (fade > 0) {
+        u16 hc = mixColor(t, C_WHITE, 0.35f);
+        alpha((int)(14 * fade));
+        glBoxFilledGradient(8, FLOOR_SY, 127, FLOOR_SY, hor, hor, hc, hc);
+        alpha((int)(14 * fade));
+        glBoxFilledGradient(128, FLOOR_SY, 247, FLOOR_SY, hc, hc, hor, hor);
+    }
+    dust(fade);
+}
+
+// Noktalardan halka (buyuk olceklerde bile puruzsuz)
+static void dotRing(float cx, float cy, float rx, float ry, float s, u16 col, int a, float rot)
+{
+    if (a <= 0) return;
+    int n = 40;
+    for (int i = 0; i < n; i++) {
+        float an = i * 6.2831853f / n + rot;
+        sprite(dotImg, cx + cosf_(an) * rx, cy + sinf_(an) * ry, s, s, col, a);
+    }
+}
+
+// ------------------------------------------------------------------ ust durum cubugu
+static void statusBar(float a)
+{
+    if (a <= 0) return;
+    int A = (int)(31 * a);
+    drawText(0, 7, 2, "GAME BOY", C_TEXT, A, 0);
+    drawText(0, 7 + textWidth(0, "GAME BOY") + 3, 2, "micro", C_ACCENT, A, 0);
+    static const char *gun[7] = { "Paz", "Pzt", "Sal", "Çar", "Per", "Cum", "Cmt" };
+    static const char *ay[12] = { "Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara" };
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    char clk[8], dt[24];
+    snprintf(clk, sizeof(clk), "%02d:%02d", t->tm_hour, t->tm_min);
+    snprintf(dt, sizeof(dt), "%s %d %s", gun[t->tm_wday % 7], t->tm_mday, ay[t->tm_mon % 12]);
+    // pil: DS / DS Lite donanimi yuzde vermez, sadece "yuksek" (15) ya da "dusuk" (3) bildirir.
+    // DSi ayrintili seviye verir (15/11/7/3/1). Renk: yesil > sari > kirmizi > bordo (kapanmak uzere).
+    static u32 bat = 0;
+    static int lowFrames = 0;                                      // ne kadar suredir dusuk
+    if (frame % 120 == 0 || bat == 0) bat = getBatteryLevel() | 0x100;
+    int lvl = bat & BATTERY_LEVEL_MASK;
+    int chg = (bat & BATTERY_CHARGER_CONNECTED) != 0;
+    if (lvl <= 3 && !chg) lowFrames++; else lowFrames = 0;
+    int stage;                                                     // 3 yesil, 2 sari, 1 kirmizi, 0 bordo
+    if (lvl >= 11) stage = 3;
+    else if (lvl >= 7) stage = 2;
+    else if (lvl >= 3 && lowFrames < 60 * 60 * 10) stage = 1;      // DS Lite: dusuk -> 10 dk kirmizi
+    else stage = 0;                                                // sonra bordo
+    if (chg) stage = 3;
+    static const u16 fillCol[4] = { RGB15(17, 2, 5), RGB15(31, 8, 6), RGB15(31, 25, 4), RGB15(11, 27, 13) };
+    static const int fillW[4] = { 3, 6, 11, 16 };
+    int x = 230, y = 5;
+    u16 frame_c = stage == 0 ? RGB15(20, 4, 7) : C_MUTED;
+    roundBox(x, y, x + 19, y + 9, frame_c, A * 3 / 4);
+    box(x + 1, y + 1, x + 18, y + 8, C_BG0, A);
+    box(x + 20, y + 3, x + 21, y + 6, frame_c, A * 3 / 4);
+    int show = !(stage == 0 && (frame / 30) % 2);                  // bordo: yanip soner
+    if (show) box(x + 2, y + 2, x + 1 + fillW[stage], y + 7, fillCol[stage], A);
+    if (chg) {                                                     // sarj: simsek
+        tri(x + 11, y + 1, x + 7, y + 5, x + 10, y + 5, C_WHITE, C_WHITE, C_WHITE, A);
+        tri(x + 9, y + 4, x + 12, y + 4, x + 8, y + 8, C_WHITE, C_WHITE, C_WHITE, A);
+    }
+    int bx = x - 6;
+    drawText(0, bx, 2, clk, C_TEXT, A, 2);
+    bx -= textWidth(0, clk) + 6;
+    drawText(0, bx, 2, dt, C_MUTED, A * 4 / 5, 2);
+    box(6, 16, 249, 16, C_FAINT, A / 3);                           // ince ayrac
+}
+
+// ------------------------------------------------------------------ kaydirma seridi
+// sideK: yan kartuslarin iceri kayma orani (giris), explode: disari ucma (baslatma)
+static void carousel(float pos, float introF, float explode, int skipCenter, int bump)
+{
+    if (gameCount == 0) return;
+    int center = (int)(pos + 0.5f);
+    for (int d = 4; d >= 0; d--) {
+        for (int side = -1; side <= 1; side += 2) {
+            if (d == 0 && side == 1) continue;
+            int i = center + d * side;
+            if (i < 0 || i >= gameCount) continue;
+            float off = i - pos;
+            float ao = fabsf(off);
+            if (ao > 2.7f) continue;
+            if (skipCenter && i == center) continue;
+            Pose p = slotPose(off);
+            float near = clampf(ao, 0, 1), far = clampf(ao - 1, 0, 3);
+            u16 col = mixColor(C_WHITE, C_BLACK, near * 0.40f + far * 0.16f);
+            int a = 31;
+            if (far > 0.8f) a = (int)(31 * clampf(1 - (far - 0.8f) / 0.9f, 0, 1));
+            int refl = (int)(9 - near * 3 - far * 2);
+            float sg = off < 0 ? -1.0f : 1.0f;
+            float c = clampf(1 - ao * 2, 0, 1);         // ortadaki kartusa yakinlik
+            if (c > 0) {                               // canli durus: hafif salinim
+                p.ry += sinf_(frame / 110.0f) * 5 * c;
+                p.rx += sinf_(frame / 83.0f) * 2.5f * c;
+                p.y += sinf_(frame / 52.0f) * 0.03f * c;
+                p.s *= 1 + 0.05f * sinf_(bump / 12.0f * 3.14159f) * c;
+            }
+            float ik = easeOut5(span(introF, ao * 5, 30 + ao * 5));   // giris: sagdan donerek gelir
+            if (ik < 1) {
+                p.x += (1 - ik) * 4.2f;
+                p.z -= (1 - ik) * 1.2f;
+                p.ry -= (1 - ik) * 110;
+                a = (int)(a * clampf(ik * 2.5f, 0, 1));
+            }
+            if (explode > 0 && ao > 0.3f) {
+                p.x += sg * explode * 3.0f;
+                p.z -= explode * 1.5f;
+                a = (int)(a * (1 - explode));
+            }
+            float shine = c > 0.5f ? ((frame % 300) / 70.0f) : -1;
+            cart3D(&games[i], p, col, a, shine, a >= 31 ? refl : 0);
+        }
+    }
+}
+
+// Etiketsiz/kapaksiz oyunun adini ortadaki kartusun etiketine yaz (2B, on katman)
+static void centerLabelText(const Game *g, float pos, float a)
+{
+    if (g->label >= 0 || g->cover >= 0 || a <= 0) return;
+    float off = (int)(pos + 0.5f) - pos;
+    if (fabsf(off) > 0.12f) return;
+    Pose p = slotPose(0);
+    CartGeo geo = cartGeo(g);
+    float sx, sy;
+    project(p.x + geo.lx0 * p.s, p.y + geo.ly0 * p.s, p.z, &sx, &sy);
+    char t[40];
+    fitText(0, t, g->title, (int)(geo.lw * p.s) - 8);
+    int A = (int)(31 * a);
+    drawText(0, (int)sx + 4, (int)sy + 4, g->type == T_GBA ? "ADVANCE" : (g->type == T_GBC ? "COLOR" : "GAME BOY"), C_WHITE, A * 2 / 3, 0);
+    drawText(0, (int)sx + 4, (int)sy + 19, t, C_WHITE, A, 0);
+}
+
+static const char *sysName(int type)
+{
+    return type == T_GBA ? "Game Boy Advance" : (type == T_GBC ? "Game Boy Color" : "Game Boy");
+}
+
+// Kucuk A dugmesi simgesi
+static void buttonIcon(int x, int y, const char *k, u16 bg, int a)
+{
+    pill(x - 6, y - 6, x + 6, y + 6, bg, a);
+    drawText(0, x, y - 8, k, C_INK, a, 1);
+}
+
+// Alt bilgi: baslik + sistem rozeti + kumanda ipuclari
+static void infoPanel(int cur, int prev, float titleE, int dir, float a, float pos)
+{
+    if (a <= 0 || gameCount == 0) return;
+    u16 t = vivid(tintCur, 0.85f);
+    // cam kart: hafif aydinlik, ust kenarda ince isik cizgisi, oyunun renginde alt cizgi
+    roundBox(12, 128, 243, 174, mixColor(C_WHITE, t, 0.25f), (int)(4 * a));
+    box(16, 128, 239, 128, C_WHITE, (int)(9 * a));
+    box(60, 174, 195, 174, t, (int)(14 * a));
+    // baslik (eski kayarak cikar, yeni kayarak girer)
+    char s[80];
+    if (prev >= 0 && titleE < 1) {
+        fitText(1, s, games[prev].title, 236);
+        drawTextShadow(1, 128 - (int)(dir * titleE * 26), 132, s, C_TEXT, (int)(31 * a * (1 - titleE)), 1);
+    }
+    fitText(1, s, games[cur].title, 236);
+    drawTextShadow(1, 128 + (int)(dir * (1 - titleE) * 26), 132, s, C_TEXT, (int)(31 * a * titleE), 1);
+
+    // sistem rozeti + sira
+    const char *sys = sysName(games[cur].type);
+    char cnt[16];
+    snprintf(cnt, sizeof(cnt), "%d / %d", cur + 1, gameCount);
+    int w1 = textWidth(0, sys) + 16, w2 = textWidth(0, cnt);
+    int x0 = 128 - (w1 + 8 + w2) / 2;
+    int A = (int)(31 * a * (0.4f + 0.6f * titleE));
+    pill(x0, 157, x0 + w1, 170, mixColor(t, C_BLACK, 0.55f), A);
+    drawText(0, x0 + w1 / 2 + 1, 156, sys, C_TEXT, A, 1);
+    drawText(0, x0 + w1 + 8, 156, cnt, C_MUTED, A, 0);
+
+    // alt satir: ipuclari
+    int B = (int)(31 * a);
+    // sol: d-pad
+    int lx = 14, ly = 182;
+    tri(lx - 3, ly, lx + 2, ly - 4, lx + 2, ly + 4, C_MUTED, C_MUTED, C_MUTED, B);
+    tri(lx + 13, ly, lx + 8, ly - 4, lx + 8, ly + 4, C_MUTED, C_MUTED, C_MUTED, B);
+    drawText(0, lx + 19, ly - 8, "Seç", C_MUTED, B, 0);
+    // sag: A Oyna
+    buttonIcon(194, 182, "A", C_TEXT, B);
+    drawText(0, 204, 174, "Oyna", C_TEXT, B, 0);
+    // orta: sayfa gostergesi
+    int dots = gameCount > 9 ? 9 : gameCount;
+    int sel = gameCount > 9 ? (int)(pos * 8 / (gameCount - 1) + 0.5f) : (int)(pos + 0.5f);
+    int dx = 128 - (dots - 1) * 4;
+    for (int i = 0; i < dots; i++) {
+        if (i == sel) pill(dx + i * 8 - 5, 180, dx + i * 8 + 5, 184, t, B);
+        else box(dx + i * 8 - 1, 181, dx + i * 8 + 1, 183, C_FAINT, B);
+    }
+}
+
+// Ekran kenarlarindaki yon oklari
+static void edgeArrows(int cur, float a)
+{
+    if (a <= 0) return;
+    float p = 0.5f + 0.5f * sinf_(frame / 18.0f);
+    int A = (int)(31 * a * (0.45f + 0.4f * p));
+    int y = 74, o = (int)(p * 2);
+    if (cur > 0) tri(4 - o, y, 10 - o, y - 7, 10 - o, y + 7, C_TEXT, C_TEXT, C_TEXT, A);
+    if (cur < gameCount - 1) tri(251 + o, y, 245 + o, y - 7, 245 + o, y + 7, C_TEXT, C_TEXT, C_TEXT, A);
+}
+
+// ------------------------------------------------------------------ acilis animasyonu
+// 0.00-1.38  bos uzay: yuzlerce parcacik girdap gibi merkeze akar, ustten isik huzmeleri iner
+// 1.38-1.70  cekirdek patlar: flas, iki sok dalgasi, yatay (anamorfik) lens parlamasi
+// 1.40-2.70  "GAME BOY micro" logosu 3B, kalinligiyla uzaktan donerek gelir
+// 2.75-3.40  logonun uzerinden isik gecer, alt yazi harf aralikli belirir
+// 3.55-4.00  logo kameraya dogru akip kaybolur -> kartuslar sirayla gelir (menu)
+#define N_P 140
+
+static void logo3D(float z, float y, float ry, float rx, float rz, float s, int a, float shine)
+{
+    if (a <= 0) return;
+    glPushMatrix();
+    glTranslatef32(0, floattof32(y), floattof32(z));
+    if (rz != 0) glRotateZi(deg(rz));
+    glRotateYi(deg(ry));
+    if (rx != 0) glRotateXi(deg(rx));
+    glScalef32(floattof32(s), floattof32(s), floattof32(s));
+    // ekstruzyon: arkaya dogru koyulasan mavi katmanlar
+    for (int k = 6; k >= 1; k--) {
+        alpha(a);
+        u16 c = mixColor(RGB15(8, 14, 31), C_BLACK, k * 0.11f);
+        quad3(logoW, -2, 0.5f, 2, -0.5f, -k * 0.035f, c, mixColor(c, C_BLACK, 0.3f), 0);
+    }
+    alpha(a);
+    quad3(logoW, -2, 0.5f, 2, -0.5f, 0, C_WHITE, RGB15(24, 27, 31), 0);
+    if (shine > 0 && shine < 1) {
+        float sx = -2.4f + 4.8f * shine;
+        alpha((int)(a * 0.6f * sinf_(shine * 3.14159f)));
+        quad3skew(dotImg, sx - 0.18f, 0.55f, sx + 0.18f, -0.55f, 0.3f, 0.01f, C_WHITE);
+    }
+    glPopMatrix(1);
+}
+
+static void (*bootTick)(void) = NULL;  // acilista yapilacak yukleme adimi (bitince NULL)
+static u16 bootDoneTint = 0;
+static void bootAnimation(void)
+{
+    static float pa[N_P], pr[N_P], pw[N_P];
+    static u16 pc[N_P];
+    u32 rnd = 0x9E3779B9;
+    for (int i = 0; i < N_P; i++) {
+        rnd = rnd * 1103515245 + 12345;
+        pa[i] = (rnd >> 8 & 0xFFFF) / 65536.0f * 6.2831853f;
+        rnd = rnd * 1103515245 + 12345;
+        pr[i] = 90 + (rnd >> 8 & 0xFFFF) / 65536.0f * 150;
+        rnd = rnd * 1103515245 + 12345;
+        pw[i] = 1.6f + (rnd >> 8 & 0xFFFF) / 65536.0f * 1.8f;
+        int k = (rnd >> 20) & 3;
+        pc[i] = k == 0 ? C_VIOLET : (k == 1 ? C_WHITE : C_CYAN);
+    }
+    u16 gameTint = tintCur;
+    tintCur = RGB15(8, 13, 30);        // acilista notr mavi ortam isigi
+    const int LEN = 240;               // 4 sn
+    for (int f = 0; f < LEN; f++) {
+        scanKeys();
+        if (bootTick) bootTick();      // kart okuma: karede bir kucuk adim (animasyon akarken)
+        if (!bootTick && f > 15 && (keysDown() & (KEY_A | KEY_B | KEY_START | KEY_TOUCH))) break;
+        float t = f / 60.0f;
+
+        // ---- logo konumu (3B)
+        float c = span(t, 1.40f, 2.70f);
+        float k = easeOut5(c);
+        float out = easeIn(span(t, 3.55f, 4.0f));
+        float lz = lerpf(-26.0f, -CAM_D, k) + out * 1.6f;
+        float ly = lerpf(-0.1f, 0.22f, easeOut(c)) + out * 0.25f;
+        float lry = (1 - k) * 540, lrx = (1 - k) * -22, lrz = (1 - k) * 16;
+        float gx, gy;
+        project(0, ly, lz, &gx, &gy);
+
+        // ---- 1) arka plan
+        beginBack();
+        float amb = easeInOut(span(t, 1.5f, 2.9f));
+        backdrop(amb, amb * (1 - out), 128, gy + 10);
+
+        float rays = span(t, 0.15f, 0.8f) * (1 - span(t, 2.3f, 3.3f));
+        if (rays > 0) {
+            float sw = sinf_(t * 0.9f) * 22;
+            u16 rc = C_CYAN;
+            tri(128 + (int)sw, -12, 40 + (int)sw * 2, 192, 120 + (int)sw * 2, 192, rc, C_BG0, C_BG0, (int)(9 * rays));
+            tri(128 - (int)sw, -12, 136 - (int)sw * 2, 192, 216 - (int)sw * 2, 192, mixColor(rc, C_VIOLET, 0.5f), C_BG0, C_BG0, (int)(7 * rays));
+            tri(128, -12, 104, 192, 152, 192, C_WHITE, C_BG0, C_BG0, (int)(6 * rays));
+        }
+
+        for (int i = 0; i < N_P; i++) {
+            float x, y, x2, y2;
+            int a;
+            float s = 0.07f + (i & 3) * 0.025f;
+            if (t < 1.38f) {
+                float q = clampf(t / 1.38f, 0, 1), q2 = clampf(t / 1.38f - 0.045f, 0, 1);
+                float r = pr[i] * (1 - q * q), r2 = pr[i] * (1 - q2 * q2);
+                float an = pa[i] + q * q * pw[i], an2 = pa[i] + q2 * q2 * pw[i];
+                x = 128 + cosf_(an) * r; y = 92 + sinf_(an) * r * 0.78f;
+                x2 = 128 + cosf_(an2) * r2; y2 = 92 + sinf_(an2) * r2 * 0.78f;
+                a = (int)(26 * span(t, 0.0f, 0.5f) * (0.5f + 0.5f * (1 - r / pr[i])));
+            } else {
+                float e = t - 1.38f;
+                float rb = 30 + pr[i] * 1.1f;
+                float r = rb * easeOut(e / 1.3f), r2 = rb * easeOut((e - 0.05f) / 1.3f);
+                float an = pa[i] + pw[i] + e * 0.5f;
+                x = 128 + cosf_(an) * r; y = 92 + sinf_(an) * r * 0.78f;
+                x2 = 128 + cosf_(an) * r2; y2 = 92 + sinf_(an) * r2 * 0.78f;
+                a = (int)(28 * (1 - span(e, 0.25f, 1.4f)));
+            }
+            if (a <= 0) continue;
+            sprite(dotImg, x2, y2, s * 0.8f, s * 0.8f, pc[i], a / 2);
+            sprite(dotImg, x, y, s, s, pc[i], a);
+        }
+
+        float core = easeIn(span(t, 0.45f, 1.40f)) * (1 - span(t, 1.40f, 1.75f));
+        if (core > 0) {
+            sprite(dotImg, 128, 92, 1 + 4.5f * core, 1 + 4.0f * core, C_CYAN, (int)(18 * core));
+            sprite(dotImg, 128, 92, 0.4f + 1.4f * core, 0.4f + 1.4f * core, C_WHITE, (int)(30 * core));
+        }
+        // logonun arkasindaki genis parlama
+        if (c > 0) sprite(dotImg, gx, gy, 3 + 5 * k, 1.5f + 2.2f * k, C_ACCENT, (int)(13 * span(c, 0, 0.3f) * (1 - out)));
+        end2D();
+
+        // ---- 2) 3B logo
+        begin3D();
+        if (c > 0) logo3D(lz, ly, lry, lrx, lrz, 0.82f, (int)(31 * (1 - out)), span(t, 2.75f, 3.40f));
+
+        // ---- 3) on katman
+        beginFront();
+        float fl = (t >= 1.38f) ? 1 - span(t, 1.38f, 1.68f) : 0;
+        if (fl > 0) box(0, 0, 255, 191, C_WHITE, (int)(30 * fl * fl));
+        float sw1 = span(t, 1.38f, 2.15f), sw2 = span(t, 1.50f, 2.35f);
+        if (sw1 > 0 && sw1 < 1) {
+            float r = easeOut(sw1);
+            dotRing(128, 92, 8 + r * 170, 6 + r * 130, 0.30f + 0.2f * r, C_CYAN, (int)(26 * (1 - r)), r * 0.6f);
+        }
+        if (sw2 > 0 && sw2 < 1) {
+            float r = easeOut(sw2);
+            dotRing(128, 92, 6 + r * 110, 5 + r * 85, 0.18f + 0.1f * r, C_WHITE, (int)(24 * (1 - r)), -r * 0.4f);
+        }
+        float lf = (t >= 1.36f) ? 1 - span(t, 1.36f, 2.3f) : span(t, 1.1f, 1.36f);
+        if (lf > 0) {
+            sprite(dotImg, 128, 92, 16 * (0.5f + 0.5f * lf), 0.30f, C_CYAN, (int)(22 * lf));
+            sprite(dotImg, 128, 92, 10 * (0.5f + 0.5f * lf), 0.10f, C_WHITE, (int)(30 * lf));
+            for (int g = 1; g <= 3; g++) {
+                float d = g * 0.45f;
+                sprite(dotImg, 128 + 70 * d, 92 + 40 * d, 0.5f * g, 0.5f * g, g == 2 ? C_VIOLET : C_CYAN, (int)(8 * lf));
+            }
+        }
+        // alt yazi
+        float st = span(t, 2.95f, 3.35f) * (1 - span(t, 3.5f, 3.8f));
+        if (st > 0) {
+            int lw = (int)(74 * easeOut(span(t, 2.95f, 3.35f)));
+            int yy = (int)gy + 30;
+            box(128 - lw, yy, 128 + lw, yy, C_ACCENT, (int)(31 * st));
+            drawTextSp(0, 128, yy + 5 + (int)(6 * (1 - st)), "SINGLE SCREEN EDITION", C_MUTED, (int)(31 * st), 1, 2);
+        }
+        end2D();
+        endFrame();
+    }
+    while (bootTick) bootTick();      // animasyon atlandiysa yuklemeyi bitir
+    tintCur = bootDoneTint ? bootDoneTint : gameTint;
+}
+
+// ------------------------------------------------------------------ yukleme (oyun baslatma) animasyonu
+// Kartus one alinir, sonra asagiya (yuvaya) takilir; yuvadan isik patlar, yukleyici halka doner.
+static void launchAnim(int cur, float pos)
+{
+    const Game *g = &games[cur];
+    u16 t = vivid(tintCur, 0.85f);
+    const int LEN = 56;
+    for (int f = 0; f <= LEN; f++) {
+        float tt = f / 60.0f;
+        float k1 = easeInOut(span(tt, 0.0f, 0.30f));
+        float k2 = easeIn(span(tt, 0.26f, 0.58f));
+        float ex = easeOut(span(tt, 0.0f, 0.35f));
+        float ui = 1 - span(tt, 0.0f, 0.18f);
+        float ld = span(tt, 0.56f, 0.70f);
+        float black = span(tt, 0.78f, 0.93f);
+
+        Pose p = slotPose(0);
+        p.z += 0.55f * k1;
+        p.y += 0.18f * k1 - 2.9f * k2;
+        p.rx = -12 * k1 - 55 * k2;
+        p.ry = sinf_(frame / 110.0f) * 9 * (1 - k1);
+        float gx, gy;
+        project(p.x, p.y, p.z, &gx, &gy);
+
+        beginBack();
+        backdrop(1, 1 - k2, gx, gy);
+        end2D();
+
+        begin3D();
+        carousel(pos, 999, ex, 1, 0);
+        cart3D(g, p, C_WHITE, 31, -1, (int)(9 * (1 - k1)));
+
+        beginFront();
+        statusBar(ui);
+        infoPanel(cur, -1, 1, 0, ui, pos);
+        // yuvaya takilma: alttan yatay isik patlamasi
+        float burst = span(tt, 0.52f, 0.62f) * (1 - span(tt, 0.62f, 0.95f));
+        if (burst > 0) {
+            sprite(dotImg, 128, 191, 14, 0.9f, t, (int)(24 * burst));
+            sprite(dotImg, 128, 191, 9, 0.25f, C_WHITE, (int)(30 * burst));
+        }
+        if (ld > 0) {
+            for (int i = 0; i < 10; i++) {
+                float an = i * 0.6283f + tt * 7.0f;
+                float lead = i / 10.0f;
+                sprite(dotImg, 128 + cosf_(an) * 14, 84 + sinf_(an) * 14, 0.14f + 0.10f * lead, 0.14f + 0.10f * lead,
+                       mixColor(C_FAINT, t, lead), (int)(31 * ld * (0.3f + 0.7f * lead)));
+            }
+            drawTextSp(0, 128, 108, "BAŞLATILIYOR", C_MUTED, (int)(31 * ld), 1, 2);
+            char s[64];
+            fitText(1, s, g->title, 236);
+            drawTextShadow(1, 128, 129, s, C_TEXT, (int)(31 * ld), 1);
+        }
+        if (black > 0) box(0, 0, 255, 191, C_BLACK, (int)(31 * black));
+        end2D();
+        endFrame();
+    }
+}
+
+// ------------------------------------------------------------------ baslatma
+static char toastMsg[64] = "";
+static int toastT = 0;
+
+static void setToast(const char *m, int frames)
+{
+    strncpy(toastMsg, m, sizeof(toastMsg) - 1);
+    toastMsg[sizeof(toastMsg) - 1] = 0;
+    toastT = frames;
+}
+
+static void drawToast(void)
+{
+    if (toastT <= 0) return;
+    float a = toastT > 150 ? 1 : toastT / 20.0f;
+    a = clampf(a, 0, 1);
+    char l1[64], *l2;
+    strcpy(l1, toastMsg);
+    l2 = strchr(l1, '\n');
+    if (l2) *l2++ = 0;
+    int w = textWidth(0, l1);
+    if (l2 && textWidth(0, l2) > w) w = textWidth(0, l2);
+    w = w / 2 + 14;
+    int y0 = 24, y1 = l2 ? 58 : 42;
+    roundBox(128 - w, y0, 128 + w, y1, RGB15(4, 5, 8), (int)(28 * a));
+    box(128 - w + 2, y0, 128 + w - 2, y0, C_FAINT, (int)(31 * a));
+    drawText(0, 128, y0 + 2, l1, C_TEXT, (int)(31 * a), 1);
+    if (l2) drawText(0, 128, y0 + 18, l2, C_MUTED, (int)(31 * a), 1);
+    toastT--;
+}
+
+static void launch(int cur, float pos)
+{
+    const Game *g = &games[cur];
+    char rom[256];
+    snprintf(rom, sizeof(rom), "%s/%s", GAME_DIR, g->file);
+    const char *emu;
+    if (g->type == T_GBA)
+        emu = access(GBAR2_A7, F_OK) == 0 ? GBAR2_A7 : GBAR2_A9;  // R4 icin ARM7 DLDI surumu
+    else
+        emu = GAMEYOB;
+    if (access(emu, F_OK) != 0) {
+        setToast("Emülatör bulunamadı", 180);
+        return;
+    }
+    launchAnim(cur, pos);
+#ifdef MACRO_AUTOTEST
+    *(vu16*)0x0400006C = 0x8000 | 2;
+#endif
+    const char *argv[2] = { emu, rom };
+    int err = runNdsFile(emu, 2, argv, 0);
+    // buraya donulduyse baslatma basarisiz oldu
+    static const char *why[] = { "", "Emülatör dosyası yok", "Klasör okunamadı", "Kart sürücüsü (DLDI) yok" };
+    char msg[64];
+    snprintf(msg, sizeof(msg), "Açılamadı (hata %d)\n%s", err, (err > 0 && err < 4) ? why[err] : "");
+    setToast(msg, 240);
+}
+
+static void launchClassic(void)
+{
+    if (access(CLASSIC_MENU, F_OK) != 0) { setToast("Klasik menü yok", 150); return; }
+    for (int f = 0; f <= 16; f++) {   // hizli kararma
+        beginFront();
+        box(0, 0, 255, 191, C_BLACK, f * 2);
+        end2D();
+        endFrame();
+    }
+    const char *argv[1] = { CLASSIC_MENU };
+    int err = runNdsFile(CLASSIC_MENU, 1, argv, 0);
+    char msg[48];
+    snprintf(msg, sizeof(msg), "Açılamadı (hata %d)", err);
+    setToast(msg, 200);
+}
+
+// ------------------------------------------------------------------ ana menu
+static void menu(int cur)
+{
+    float pos = cur;            // animasyonlu konum
+    int intro = 0;              // giris animasyonu (kare)
+    int bump = 0;               // secim degisince kucuk ziplama
+    int dir = 1, prev = -1;
+    float titleE = 1;
+    int bright = 4;
+    keysSetRepeat(18, 6);
+
+#ifdef MACRO_AUTOTEST
+    int autoIdx = -1, autoWait = 150;
+    {
+        FILE *af = fopen("fat:/_macro/autotest.txt", "r");
+        char an[128] = {0};
+        if (af) { if (!fgets(an, sizeof(an), af)) an[0] = 0; fclose(af); }
+        an[strcspn(an, "\r\n")] = 0;
+        for (int i = 0; i < gameCount; i++) if (an[0] && !strcmp(games[i].file, an)) autoIdx = i;
+    }
+#endif
+    while (1) {
+        scanKeys();
+        int down = keysDown();
+#ifdef MACRO_AUTOTEST
+        if (autoIdx >= 0 && --autoWait == 0) { cur = autoIdx; pos = cur; down |= KEY_A; }
+        if (autoIdx < 0 && autoWait > 0 && --autoWait == 60) down |= KEY_RIGHT;   // gezinme testi
+#endif
+        int rep = keysDownRepeat() | (down & KEY_RIGHT) | (down & KEY_LEFT);
+        int old = cur;
+        if (gameCount > 0 && intro > 24) {
+            if (rep & KEY_RIGHT) { if (cur < gameCount - 1) cur++; }
+            if (rep & KEY_LEFT)  { if (cur > 0) cur--; }
+            if (rep & KEY_R) cur = cur + 5 < gameCount ? cur + 5 : gameCount - 1;
+            if (rep & KEY_L) cur = cur - 5 >= 0 ? cur - 5 : 0;
+            if (down & KEY_TOUCH) {
+                touchPosition tp;
+                touchRead(&tp);
+                if (tp.px < 70 && cur > 0) cur--;
+                else if (tp.px > 186 && cur < gameCount - 1) cur++;
+                else if (tp.py > 20 && tp.py < 140) down |= KEY_A;
+            }
+            if (cur != old) {
+                bump = 12;
+                dir = cur > old ? 1 : -1;
+                prev = old;
+                titleE = 0;
+            }
+            if (down & KEY_A) {
+                saveLast(cur);
+                launch(cur, pos);
+                intro = 0;   // basarisiz olursa menu yeniden belirsin
+            }
+        }
+        if (down & KEY_START) { launchClassic(); intro = 0; }
+        if (down & KEY_SELECT) {
+            bright = bright % 5 + 1;
+            systemSetBacklightLevel(bright);
+            char m[32];
+            snprintf(m, sizeof(m), "Parlaklık %d / 5", bright);
+            setToast(m, 90);
+        }
+
+        if (gameCount > 0) tintCur = mixColor(tintCur, games[cur].tint, 0.10f);
+        pos += (cur - pos) * 0.20f;
+        if (fabsf(cur - pos) < 0.002f) pos = cur;
+        if (bump > 0) bump--;
+        if (titleE < 1) titleE = clampf(titleE + 1 / 11.0f, 0, 1);
+        if (intro < 90) intro++;
+        float ui = easeOut(span(intro, 14, 44));
+        if (gameCount > 0) floorSy += (floorFor(&games[cur]) - floorSy) * 0.15f;
+        float tE = prev < 0 ? ui : easeOut(titleE);
+
+        Pose cp = slotPose(0);
+        float gx, gy;
+        project(cp.x, cp.y, cp.z, &gx, &gy);
+
+        // 1) arka plan
+        beginBack();
+        backdrop(1, gameCount > 0 ? 1 : 0, gx, gy);
+        end2D();
+
+        // 2) 3B kartuslar
+        begin3D();
+        carousel(pos, intro, 0, 0, bump);
+
+        // 3) arayuz
+        beginFront();
+        statusBar(ui);
+        if (gameCount == 0) {
+            drawTextShadow(1, 128, 70, "Oyun bulunamadı", C_TEXT, 31, 1);
+            drawText(0, 128, 98, "Oyunları kartta Gameboy klasörüne koy", C_MUTED, 31, 1);
+        } else {
+            centerLabelText(&games[cur], pos, ui);
+            edgeArrows(cur, ui);
+            infoPanel(cur, prev, tE, dir, ui, pos);
+        }
+        drawToast();
+        end2D();
+        endFrame();
+    }
+}
+
+// ------------------------------------------------------------------ giris
+int main(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    // yalnizca alt ekran: ana motor alta, ust ekran isigi kapali
+    powerOff(PM_BACKLIGHT_TOP);
+    lcdMainOnBottom();
+    videoSetMode(MODE_0_3D);
+    videoSetModeSub(0);
+    vramSetBankA(VRAM_A_TEXTURE);
+    vramSetBankB(VRAM_B_TEXTURE);
+    vramSetBankC(VRAM_C_TEXTURE);      // ust ekran kullanilmadigi icin C ve D de doku icin
+    vramSetBankD(VRAM_D_TEXTURE);      // (D, oyun baslatilirken yukleyiciye verilir)
+    vramSetBankE(VRAM_E_TEX_PALETTE);
+
+    glScreen2D();
+    glClearColor(0, 0, 1, 31);
+    glClearPolyID(63);
+    glClearDepth(GL_MAX_DEPTH);
+    glEnable(GL_BLEND);
+    glEnable(GL_TEXTURE_2D);
+    loadTextures();
+
+    // once oyunlari ve resimleri yukle: acilis animasyonu son oynanan oyunun kartusunu kullanir
+    bool fatOk = fatInitDefault();
+    int last = 0;
+    if (fatOk) {
+        scanGames();
+        loadCovers();
+        loadLabels();
+        if (gameCount > 0) {
+            last = loadLast();
+            tintCur = games[last].tint;
+        }
+    }
+    Game demo;
+    memset(&demo, 0, sizeof(demo));
+    demo.label = -1;
+    demo.cover = -1;
+    demo.c1 = RGB15(10, 16, 30);
+    demo.c2 = RGB15(4, 6, 14);
+    strcpy(demo.title, "macro DS Lite");
+    (void)demo;
+    if (gameCount > 0) floorSy = floorFor(&games[last]);
+    bootAnimation();
+
+    if (!fatOk) {
+        while (1) {
+            beginBack();
+            backdrop(1, 0, 128, 80);
+            end2D();
+            beginFront();
+            drawTextShadow(1, 128, 76, "Kart okunamadı", C_TEXT, 31, 1);
+            drawText(0, 128, 102, "microSD kartı kontrol et", C_MUTED, 31, 1);
+            end2D();
+            endFrame();
+        }
+    }
+    menu(last);
+    return 0;
+}

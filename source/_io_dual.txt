@@ -1,0 +1,510 @@
+
+// ================================================================== oyun listesi, etiketler, dokular
+// Paletli bir goruntunun baskin rengi (doygun pikseller agirlikli)
+static u16 averageColor(const u16 *pal, const u8 *pix, int w, int h, int stride)
+{
+    u32 r = 0, g = 0, b = 0, n = 0;
+    for (int y = 0; y < h; y += 2)
+        for (int x = 0; x < w; x += 2) {
+            u8 i = pix[y * stride + x];
+            u16 c = pal[i];
+            int R = c & 31, G = (c >> 5) & 31, B = (c >> 10) & 31;
+            int mx = R > G ? (R > B ? R : B) : (G > B ? G : B);
+            int mn = R < G ? (R < B ? R : B) : (G < B ? G : B);
+            u32 wgt = 1 + (mx - mn) * (mx - mn);
+            r += R * wgt; g += G * wgt; b += B * wgt; n += wgt;
+        }
+    if (!n) return RGB15(12, 16, 28);
+    return RGB15(r / n, g / n, b / n);
+}
+
+// 16 bit goruntunun baskin rengi
+static u16 average16(const u16 *pix, int w, int h, int stride)
+{
+    u32 r = 0, g = 0, b = 0, n = 0;
+    for (int y = 0; y < h; y += 2)
+        for (int x = 0; x < w; x += 2) {
+            u16 c = pix[y * stride + x];
+            if (!(c & BIT(15))) continue;
+            int R = c & 31, G = (c >> 5) & 31, B = (c >> 10) & 31;
+            int mx = R > G ? (R > B ? R : B) : (G > B ? G : B);
+            int mn = R < G ? (R < B ? R : B) : (G < B ? G : B);
+            u32 wgt = 1 + (mx - mn) * (mx - mn);
+            r += R * wgt; g += G * wgt; b += B * wgt; n += wgt;
+        }
+    if (!n) return RGB15(12, 16, 28);
+    return RGB15(r / n, g / n, b / n);
+}
+
+static const char *ext(const char *f)
+{
+    const char *d = strrchr(f, '.');
+    return d ? d : "";
+}
+
+// Dogal siralama ("2-" < "10-"), buyuk/kucuk harf duyarsiz
+static int cmpName(const char *x, const char *y)
+{
+    while (*x && *y) {
+        if (*x >= '0' && *x <= '9' && *y >= '0' && *y <= '9') {
+            long nx = strtol(x, (char **)&x, 10), ny = strtol(y, (char **)&y, 10);
+            if (nx != ny) return nx < ny ? -1 : 1;
+            continue;
+        }
+        int cx = (*x >= 'A' && *x <= 'Z') ? *x + 32 : *x;
+        int cy = (*y >= 'A' && *y <= 'Z') ? *y + 32 : *y;
+        if (cx != cy) return cx - cy;
+        x++; y++;
+    }
+    return (u8)*x - (u8)*y;
+}
+static int cmpGame(const void *a, const void *b)
+{
+    const Game *ga = a, *gb = b;
+    if (ga->tab != gb->tab) return ga->tab - gb->tab;
+    return cmpName(ga->file, gb->file);
+}
+
+// "0003 - Pokemon HeartGold .nds" -> "Pokemon HeartGold"; "0000-----Pokemon-----.gba" -> "Pokemon" (ayirici)
+static void makeTitle(char *out, const char *file, int *sep)
+{
+    *sep = strstr(file, "---") != NULL;
+    const char *p = file;
+    while (*p >= '0' && *p <= '9') p++;
+    while (*p == '-' || *p == ' ' || *p == '_') p++;
+    if (!*p) p = file;
+    strncpy(out, p, 71);
+    out[71] = 0;
+    char *d = strrchr(out, '.');
+    if (d) *d = 0;
+    int n = strlen(out);
+    while (n > 0 && (out[n - 1] == ' ' || out[n - 1] == '-')) out[--n] = 0;
+}
+
+static void gamePath(const Game *g, char *out, int n)
+{
+    const char *dir = g->tab == TAB_NDS ? NDS_DIR : (g->tab == TAB_GBA ? GBA_DIR : GB_DIR);
+    snprintf(out, n, "%s/%s", dir, g->file);
+}
+
+static int hasWord(const char *s, const char *w)
+{
+    for (; *s; s++) {
+        const char *a = s, *b = w;
+        while (*a && *b && (*a | 32) == (*b | 32)) { a++; b++; }
+        if (!*b) return 1;
+    }
+    return 0;
+}
+
+// GB kartus plastigi: Game Boy gri, GB+GBC ortak siyah, sadece GBC mor-gri; bazi oyunlarin kendi rengi
+static void shellStyle(Game *g)
+{
+    g->clear = 0;
+    if (g->cgb == 0xC0) g->shell = RGB15(21, 21, 27);
+    else if (g->cgb == 0x80) g->shell = RGB15(6, 6, 8);
+    else g->shell = RGB15(20, 20, 21);
+    static const struct { const char *k; u16 c; } T[] = {
+        { "yellow", RGB15(31, 25, 3) }, { "red version", RGB15(26, 5, 5) }, { "blue version", RGB15(5, 10, 27) },
+        { "green version", RGB15(6, 20, 8) }, { "gold", RGB15(27, 21, 6) }, { "silver", RGB15(25, 25, 27) },
+        { "crystal", RGB15(17, 24, 30) },
+    };
+    for (unsigned i = 0; i < sizeof(T) / sizeof(T[0]); i++)
+        if (hasWord(g->title, T[i].k)) g->shell = T[i].c;
+}
+
+// UTF-16 -> UTF-8 (BMP)
+static int putUtf8(char *o, int room, u16 c)
+{
+    if (c < 0x80) { if (room < 1) return 0; o[0] = c; return 1; }
+    if (c < 0x800) { if (room < 2) return 0; o[0] = 0xC0 | (c >> 6); o[1] = 0x80 | (c & 63); return 2; }
+    if (room < 3) return 0;
+    o[0] = 0xE0 | (c >> 12); o[1] = 0x80 | ((c >> 6) & 63); o[2] = 0x80 | (c & 63);
+    return 3;
+}
+
+// NDS banner: 32x32 simge + Ingilizce baslik ("Ad\nAlt ad\nYayinci")
+static void readNdsBanner(Game *g, const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    u32 off = 0;
+    if (fseek(f, 0x68, SEEK_SET) != 0 || fread(&off, 4, 1, f) != 1 || off == 0 || off > 0x10000000) { fclose(f); return; }
+    static u8 bn[0x440];
+    if (fseek(f, off, SEEK_SET) != 0 || fread(bn, 1, sizeof(bn), f) != sizeof(bn)) { fclose(f); return; }
+    fclose(f);
+    // simge: 4x4 karo, karo basina 8x8 piksel, 4 bit; palet 16 renk (0 = saydam)
+    const u8 *bmp = bn + 0x20;
+    const u16 *pal = (const u16 *)(bn + 0x220);
+    g->icon = malloc(32 * 32 * 2);
+    if (g->icon) {
+        for (int ty = 0; ty < 4; ty++)
+            for (int tx = 0; tx < 4; tx++)
+                for (int y = 0; y < 8; y++)
+                    for (int x = 0; x < 8; x++) {
+                        u8 b = bmp[(ty * 4 + tx) * 32 + y * 4 + x / 2];
+                        int idx = (x & 1) ? (b >> 4) : (b & 15);
+                        g->icon[(ty * 8 + y) * 32 + tx * 8 + x] = idx ? (pal[idx] | BIT(15)) : 0;
+                    }
+        g->tint = average16(g->icon, 32, 32, 32);
+    }
+    // Ingilizce baslik: satirlara bol; son satir yayinci, oncekiler ad
+    const u16 *t = (const u16 *)(bn + 0x340);
+    char lines[3][72];
+    int nl = 0, k = 0;
+    memset(lines, 0, sizeof(lines));
+    for (int i = 0; i < 128 && t[i]; i++) {
+        if (t[i] == '\n') { if (nl < 2) { nl++; k = 0; } continue; }
+        if (t[i] == '\r') continue;
+        k += putUtf8(lines[nl] + k, 70 - k, t[i]);
+    }
+    if (!lines[0][0]) return;
+    int last = nl;
+    if (last >= 1) {
+        strncpy(g->sub, lines[last], sizeof(g->sub) - 1);
+        g->title[0] = 0;
+        for (int i = 0; i < last; i++) {
+            if (i) strncat(g->title, " ", sizeof(g->title) - strlen(g->title) - 1);
+            strncat(g->title, lines[i], sizeof(g->title) - strlen(g->title) - 1);
+        }
+    } else {
+        strncpy(g->title, lines[0], sizeof(g->title) - 1);
+    }
+}
+
+static int tabCount[TAB_N];         // oyun sayisi (ayiricilar haric)
+
+static void scanDir(const char *dirPath, int tab)
+{
+    DIR *dir = opendir(dirPath);
+    if (!dir) return;
+    struct dirent *e;
+    while ((e = readdir(dir)) && gameCount < MAX_GAMES) {
+        if (e->d_name[0] == '.') continue;
+        const char *x = ext(e->d_name);
+        int type;
+        if (tab == TAB_NDS && !strcasecmp(x, ".nds")) type = T_NDS;
+        else if (tab == TAB_GBA && !strcasecmp(x, ".gba")) type = T_GBA;
+        else if (tab == TAB_GB && !strcasecmp(x, ".gbc")) type = T_GBC;
+        else if (tab == TAB_GB && !strcasecmp(x, ".gb")) type = T_GB;
+        else continue;
+        if (type == T_NDS && hasWord(e->d_name, "GBARunner")) continue;   // emulator, oyun degil
+        Game *g = &games[gameCount++];
+        memset(g, 0, sizeof(*g));
+        strncpy(g->file, e->d_name, sizeof(g->file) - 1);
+        makeTitle(g->title, g->file, &g->sep);
+        g->type = type;
+        g->tab = tab;
+        g->label = -1;
+        g->cover = -1;
+        u32 h = 2166136261u;
+        for (const char *c = g->file; *c; c++) h = (h ^ (u8)*c) * 16777619u;
+        g->c1 = RGB15(8 + (h & 15), 8 + ((h >> 4) & 15), 14 + ((h >> 8) & 15));
+        g->c2 = mixColor(g->c1, RGB15(2, 2, 6), 0.6f);
+        g->tint = g->c1;
+        g->shell = C_WHITE;
+        if (g->sep) continue;
+        tabCount[tab]++;
+    }
+    closedir(dir);
+}
+
+// tek oyunun dosya okumalari (kayit var mi, NDS basligi/simgesi, GB renk bayragi); acilista karede bir
+static void probeGame(Game *g)
+{
+    if (g->sep) return;
+    char path[256], sav[256];
+    gamePath(g, path, sizeof(path));
+    strcpy(sav, path);
+    strcpy(strrchr(sav, '.'), ".sav");
+    struct stat st;
+    g->hasSave = stat(sav, &st) == 0 && st.st_size > 0;
+    if (g->type == T_NDS) {
+        readNdsBanner(g, path);
+    } else if (g->type != T_GBA) {
+        FILE *rf = fopen(path, "rb");
+        if (rf) {
+            if (fseek(rf, 0x143, SEEK_SET) == 0) { int c = fgetc(rf); g->cgb = c < 0 ? 0 : (u8)c; }
+            fclose(rf);
+        }
+        if (g->cgb == 0xC0 || g->cgb == 0x80) g->type = T_GBC;
+        shellStyle(g);
+    }
+}
+
+static void scanGames(void)
+{
+    scanDir(NDS_DIR, TAB_NDS);
+    scanDir(GBA_DIR, TAB_GBA);
+    scanDir(GB_DIR, TAB_GB);
+    qsort(games, gameCount, sizeof(Game), cmpGame);
+}
+
+// ------------------------------------------------------------------ etiketler
+static void labelDims(const Game *g, int *w, int *h)
+{
+    if (g->type == T_NDS) { *w = DS_LABEL_W; *h = DS_LABEL_H; }
+    else if (g->type == T_GBA) { *w = CART_LABEL_W; *h = CART_LABEL_H; }
+    else { *w = GB_LABEL_W; *h = GB_LABEL_H; }
+}
+
+// 16 bitlik kucuk resim (liste simgesi): etiketin ortasindan kare kesip 32x32'ye kucult
+static u16 *thumbFrom(const u16 *pal, const u8 *pix, const u16 *pix16, int w, int h, int stride)
+{
+    u16 *o = malloc(32 * 32 * 2);
+    if (!o) return NULL;
+    int side = w < h ? w : h, x0 = (w - side) / 2, y0 = (h - side) / 2;
+    for (int y = 0; y < 32; y++)
+        for (int x = 0; x < 32; x++) {
+            int sx = x0 + x * side / 32, sy = y0 + y * side / 32;
+            u16 c = pix16 ? pix16[sy * stride + sx] : pal[pix[sy * stride + sx]];
+            o[y * 32 + x] = c | BIT(15);
+        }
+    return o;
+}
+
+// ust ekran icin 64x64 kare: etiketin ortasindan kare, kutu filtreli kucultme, yuvarlak koseler (r=9)
+static u16 *makeTile(const u16 *pal, const u8 *pix, int w, int h, int stride, int *ow, int *oh)
+{
+    // etiketin tamami (kesilmez), en fazla 72x64, kutu filtreli kucultme, yuvarlak koseler
+    int dw = 72, dh = h * 72 / w;
+    if (dh > 64) { dh = 64; dw = w * 64 / h; }
+    u16 *o = malloc(dw * dh * 2);
+    if (!o) return NULL;
+    for (int y = 0; y < dh; y++) {
+        int sy0 = y * h / dh, sy1 = (y + 1) * h / dh;
+        if (sy1 <= sy0) sy1 = sy0 + 1;
+        for (int x = 0; x < dw; x++) {
+            int sx0 = x * w / dw, sx1 = (x + 1) * w / dw;
+            if (sx1 <= sx0) sx1 = sx0 + 1;
+            int r = 0, g = 0, b = 0, n = 0;
+            for (int yy = sy0; yy < sy1; yy++)
+                for (int xx = sx0; xx < sx1; xx++) {
+                    u16 c = pal[pix[yy * stride + xx]];
+                    r += c & 31; g += (c >> 5) & 31; b += (c >> 10) & 31; n++;
+                }
+            o[y * dw + x] = RGB15(r / n, g / n, b / n) | BIT(15);
+        }
+    }
+    const int R = 7;
+    for (int y = 0; y < R; y++)
+        for (int x = 0; x < R; x++) {
+            int dx = R - x, dy = R - y;
+            if (dx * dx + dy * dy > R * R + 2) {
+                o[y * dw + x] = 0; o[y * dw + dw - 1 - x] = 0;
+                o[(dh - 1 - y) * dw + x] = 0; o[(dh - 1 - y) * dw + dw - 1 - x] = 0;
+            }
+        }
+    *ow = dw; *oh = dh;
+    return o;
+}
+
+#define TW 72
+#define TH 54
+static u16 *makeThumb(const u16 *pal, const u8 *pix, int w, int h, int stride)
+{
+    u16 *o = malloc(TW * TH * 2);
+    if (!o) return NULL;
+    for (int i = 0; i < TW * TH; i++) o[i] = RGB15(3, 3, 5) | BIT(15);
+    int dw, dh;
+    if (w * TH >= h * TW) { dw = TW; dh = h * TW / w; } else { dh = TH; dw = w * TH / h; }
+    int ox = (TW - dw) / 2, oy = (TH - dh) / 2;
+    for (int y = 0; y < dh; y++) {
+        int sy0 = y * h / dh, sy1 = (y + 1) * h / dh;
+        if (sy1 <= sy0) sy1 = sy0 + 1;
+        for (int x = 0; x < dw; x++) {
+            int sx0 = x * w / dw, sx1 = (x + 1) * w / dw;
+            if (sx1 <= sx0) sx1 = sx0 + 1;
+            int r = 0, g = 0, b = 0, n = 0;
+            for (int yy = sy0; yy < sy1; yy++)
+                for (int xx = sx0; xx < sx1; xx++) {
+                    u16 c = pal[pix[yy * stride + xx]];
+                    r += c & 31; g += (c >> 5) & 31; b += (c >> 10) & 31; n++;
+                }
+            o[(oy + y) * TW + ox + x] = RGB15(r / n, g / n, b / n) | BIT(15);
+        }
+    }
+    return o;
+}
+
+// Uretilmis etiketler: _macro/labels/<oyun adi>.lbl (128x64, 256 renk)
+static int loadLabels(int maxN)
+{
+    static u8 buf[512 + 8192];
+    int done = 0;
+    for (int i = 0; i < gameCount && labelCount < MAX_LABELS; i++) {
+        Game *g = &games[i];
+        if (g->sep || g->label != -1) continue;
+        if (done >= maxN) return 0;
+        done++;
+        g->label = -2;                              // denendi (bulunamazsa -2 kalir)
+        char path[256];
+        if (g->type == T_NDS) {                     // NDS: kapak resminden hazirlanan etiket, dosya adiyla
+            snprintf(path, sizeof(path), "%s/%s", LABEL_DIR, g->file);
+            strcpy(strrchr(path, '.'), ".lbl");
+        } else {
+            snprintf(path, sizeof(path), "%s/%s.lbl", LABEL_DIR, g->title);
+        }
+        FILE *f = fopen(path, "rb");
+        if (!f) continue;
+        size_t n = fread(buf, 1, sizeof(buf), f);
+        fclose(f);
+        if (n != sizeof(buf)) continue;
+        int lw, lh;
+        labelDims(g, &lw, &lh);
+        int id;
+        if (g->type == T_NDS) {                     // NDS etiketi 64x64 doku (4 KB): kartustaki pencereye gerilir
+            static u8 p64[64 * 64];
+            for (int y = 0; y < 64; y++) memcpy(p64 + y * 64, buf + 512 + y * 128, 64);
+            id = glLoadTileSet(labelImg[labelCount], 64, 64, 64, 64, GL_RGB256,
+                               TEXTURE_SIZE_64, TEXTURE_SIZE_64, TEXGEN_OFF, 256, (u16 *)buf, p64);
+        } else
+            id = glLoadTileSet(labelImg[labelCount], lw, lh, 128, 64, GL_RGB256,
+                               TEXTURE_SIZE_128, TEXTURE_SIZE_64, TEXGEN_OFF, 256, (u16 *)buf, buf + 512);
+        if (id < 0) break;
+        g->label = labelCount++;
+        g->tint = averageColor((u16 *)buf, buf + 512, lw, lh, 128);
+        if (!g->icon) g->icon = thumbFrom((u16 *)buf, buf + 512, NULL, lw, lh, 128);
+        if (g->type != T_NDS) g->tile = makeTile((u16 *)buf, buf + 512, lw, lh, 128, &g->tileW, &g->tileH);
+        g->thumb = makeThumb((u16 *)buf, buf + 512, lw, lh, 128);
+    }
+    return 1;
+}
+
+// NDS etiketi (gercek DS kart etiketine benzer): ustte beyaz serit ve "NINTENDO DS", altinda
+// oyunun simgesi 2 kat buyutulmus, simgenin renginden yumusak bir zemin uzerinde. 256 renk:
+//   1..15 simge, 16..79 zemin gecisi, 80..87 serit -> yazi, 88 serit alt cizgisi
+#define BAND_H 0      // NINTENDO DS logosu artik kabuktaki beyaz bantta
+static void makeNdsLabels(void)
+{
+    static u16 pal[256];
+    static u8 pix[128 * 64];
+    for (int i = 0; i < gameCount && labelCount < MAX_LABELS; i++) {
+        Game *g = &games[i];
+        if (g->sep || g->type != T_NDS || g->label >= 0 || !g->icon) continue;
+        u16 base = vivid(g->tint, 0.85f);
+        u16 top = mixColor(base, C_WHITE, 0.45f), bot = mixColor(base, C_BLACK, 0.30f);
+        for (int k = 0; k < 64; k++) pal[16 + k] = mixColor(top, bot, k / 63.0f);
+        u16 band = RGB15(30, 30, 31), ink = RGB15(6, 6, 8);
+        for (int k = 0; k < 8; k++) pal[80 + k] = mixColor(band, ink, k / 7.0f);
+        pal[88] = RGB15(22, 22, 24);
+        pal[0] = band;
+        int iconPal = 1;
+        static u16 ipal[16];
+        for (int p = 0; p < 32 * 32; p++) {
+            u16 c = g->icon[p];
+            if (!(c & BIT(15))) continue;
+            c &= 0x7FFF;
+            int found = 0;
+            for (int q = 1; q < iconPal; q++) if (ipal[q] == c) { found = 1; break; }
+            if (!found && iconPal < 16) ipal[iconPal++] = c;
+        }
+        for (int q = 1; q < 16; q++) pal[q] = q < iconPal ? ipal[q] : 0;
+        memset(pix, 0, sizeof(pix));
+        int artH = DS_LABEL_H - BAND_H;
+        for (int y = 0; y < DS_LABEL_H; y++)
+            for (int x = 0; x < DS_LABEL_W; x++) {
+                if (y < BAND_H) { pix[y * 128 + x] = (y == BAND_H - 1) ? 88 : 80; continue; }
+                int yy = y - BAND_H;
+                int dx = x - DS_LABEL_W / 2, dy = yy - artH / 3;
+                int k = yy * 63 / artH + (dx * dx + dy * dy) / 90;
+                if (k > 63) k = 63;
+                pix[y * 128 + x] = 16 + k;
+            }
+        // "NINTENDO DS" yazisi (kucuk yazi tipinden, alfa -> serit/yazi rampasi)
+        {
+            const char *txt = "NINTENDO DS";
+            int x = 4;
+            for (const char *c = txt; *c; c++) {
+                int gi = glyphIndex((u8)*c);
+                int gx = font_s_coords[gi * 4], gy = font_s_coords[gi * 4 + 1];
+                int gw = font_s_coords[gi * 4 + 2], gh = font_s_coords[gi * 4 + 3];
+                for (int j = 0; j < gh; j++) {
+                    int yy = j - 1;                    // yazi tipinin ust boslugu
+                    if (yy < 0 || yy >= BAND_H - 1) continue;
+                    for (int k = 0; k < gw; k++) {
+                        int al = font_s_tex[(gy + j) * 256 + gx + k] >> 3;
+                        if (al && x + k < DS_LABEL_W) pix[yy * 128 + x + k] = 80 + (al >> 2);
+                    }
+                }
+                x += font_s_adv[gi] - (*c == ' ' ? 1 : 0);
+            }
+        }
+        // simge 2x, resim alaninin ortasina (alan 50 px: simgenin ust/alt bos kenarlari kirpilir)
+        int ox = (DS_LABEL_W - 64) / 2, oy = BAND_H + (artH - 64) / 2;
+        for (int y = 0; y < 64; y++) {
+            int py = oy + y;
+            if (py < BAND_H || py >= DS_LABEL_H) continue;
+            for (int x = 0; x < 64; x++) {
+                u16 c = g->icon[(y / 2) * 32 + x / 2];
+                if (!(c & BIT(15))) continue;
+                c &= 0x7FFF;
+                int q = 1;
+                while (q < iconPal && ipal[q] != c) q++;
+                if (q < iconPal) pix[py * 128 + ox + x] = q;
+            }
+        }
+        int id = glLoadTileSet(labelImg[labelCount], DS_LABEL_W, DS_LABEL_H, 128, 64, GL_RGB256,
+                               TEXTURE_SIZE_128, TEXTURE_SIZE_64, TEXGEN_OFF, 256, pal, pix);
+        if (id < 0) break;
+        g->label = labelCount++;
+        g->thumb = makeThumb(pal, pix, DS_LABEL_W, DS_LABEL_H, 128);
+    }
+}
+
+// ------------------------------------------------------------------ buyuk kapaklar (_macro/hero/<oyun>.hrb)
+static inline u16 bgDark15(u16 d, u16 c, int a)
+{
+    int r = d & 31, g = (d >> 5) & 31, b = (d >> 10) & 31;
+    int R = c & 31, G = (c >> 5) & 31, B = (c >> 10) & 31;
+    a += a >> 4;
+    r += ((R - r) * a) >> 5; g += ((G - g) * a) >> 5; b += ((B - b) * a) >> 5;
+    return RGB15(r, g, b) | BIT(15);
+}
+static void loadBg(Game *g)
+{
+    if (!g || g->sep || g->bgTried) return;
+    g->bgTried = 1;
+    char path[256];
+    snprintf(path, sizeof(path), "fat:/_macro/hero/%s", g->file);
+    char *d = strrchr(path, '.');
+    if (!d) return;
+    strcpy(d, ".bgb");                                 // bulanik arka plan (.hrb artik kullanilmiyor, okunmaz)
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    g->bg = malloc(128 * 96 * 2);
+    if (g->bg && fread(g->bg, 2, 128 * 96, f) != 128 * 96) { free(g->bg); g->bg = NULL; }
+    if (g->bg)                                         // vitrin karartmasi bir kez (ekran satiri = 2 x kaynak)
+        for (int y = 0; y < 96; y++) {
+            int Y = 2 * y, a = Y < 18 ? 20 - Y : (Y >= 124 ? (Y - 124) * 22 / 68 : 0);
+            if (a > 0)
+                for (int x = 0; x < 128; x++) g->bg[y * 128 + x] = bgDark15(g->bg[y * 128 + x], RGB15(0, 0, 1), a);
+        }
+    fclose(f);
+}
+
+// ------------------------------------------------------------------ dokular
+static void loadTextures(void)
+{
+    static u16 white8[8];
+    for (int i = 0; i < 8; i++) white8[i] = C_WHITE;
+    glLoadSpriteSet(fontS, FONT_S_N, font_s_coords, GL_RGB8_A5, TEXTURE_SIZE_256, TEXTURE_SIZE_128,
+                    TEXGEN_OFF, 8, white8, font_s_tex);
+    glLoadSpriteSet(fontL, FONT_L_N, font_l_coords, GL_RGB8_A5, TEXTURE_SIZE_256, TEXTURE_SIZE_256,
+                    TEXGEN_OFF, 8, white8, font_l_tex);
+    {
+        static u16 wpal[8];
+        for (int i = 0; i < 8; i++) wpal[i] = C_WHITE;
+        wpal[2] = RGB15(13, 21, 31);
+        glLoadTileSet(logoW, 256, 64, 256, 64, GL_RGB8_A5, TEXTURE_SIZE_256, TEXTURE_SIZE_64,
+                      TEXGEN_OFF, 8, wpal, logo_tex);
+    }
+    glLoadTileSet(dotImg, 32, 32, 32, 32, GL_RGB8_A5, TEXTURE_SIZE_32, TEXTURE_SIZE_32,
+                  TEXGEN_OFF, 8, white8, dot_tex);
+    glLoadTileSet(gbCartImg, 128, 128, 128, 128, GL_RGB256, TEXTURE_SIZE_128, TEXTURE_SIZE_128,
+                  TEXGEN_OFF | GL_TEXTURE_COLOR0_TRANSPARENT, 256, gbcart_pal, gbcart_tex);
+    glLoadTileSet(dsCartImg, 128, 128, 128, 128, GL_RGB256, TEXTURE_SIZE_128, TEXTURE_SIZE_128,
+                  TEXGEN_OFF | GL_TEXTURE_COLOR0_TRANSPARENT, 256, dscart_pal, dscart_tex);
+    glLoadTileSet(cartImg, 256, 128, 256, 128, GL_RGB256, TEXTURE_SIZE_256, TEXTURE_SIZE_128,
+                  TEXGEN_OFF | GL_TEXTURE_COLOR0_TRANSPARENT, 256, cart_pal, cart_tex);
+}

@@ -1,0 +1,47 @@
+# --- Oyunlar, kayitlar, kart imajlari: ASLA yuklenmez
+*.nds
+*.gba
+*.gb
+*.gbc
+*.sav
+*.img
+*.srldr
+# kartin orijinal yazilimi (R4.dat / ysmenu.dat / TTMenu.dat vb.) kullanicinin kendi kartindan gelir
+*.dat
+*.DAT
+
+# --- Telifli gorseller ve onlardan uretilen dosyalar (herkes kendi indirir / uretir)
+tools/covers/
+tools/carts/
+tools/photos/
+tools/tetris_cart_photo.png
+sdroot/
+
+# --- Uretilen dosyalar (make_assets.py ile yeniden olusur; Windows yazi tipinden uretilen bitmapler icerir)
+source/assets.c
+source/assets.h
+source/load_bin.c
+source/load_bin.h
+
+# --- Onizleme ve gecici dosyalar
+tools/_*.png
+__pycache__/
+build/
+*.o
+*.d
+*.elf
+
+# --- Gelistirme sirasindaki eski yedekler
+*.v[0-9]
+*.v[0-9][0-9]
+*.y1
+*.bak
+Makefile.v*
+q.sh
+source/_bottom_v3.txt
+source/_ui_v2_rest.txt
+source/_ui_v4_rest.txt
+source/_io_part.txt
+tools/ds_options.py
+tools/ds_options2.py
+tools/assemble.py

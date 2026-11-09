@@ -1,0 +1,385 @@
+// macro DS - cift ekranli R4 menusu ("Polar" temasi)
+// Ust ekran: 3B kartus halkasi (DS'in 3D motoru). Alt ekran: dokunmatik oyun listesi (2B bitmap).
+// NDS oyunlari kartin kendi YSMenu cekirdegiyle (AUTO_BOOT), GBA oyunlari GBARunner2, GB/GBC GameYob ile acilir.
+
+#include <nds.h>
+#include <fat.h>
+#include <gl2d.h>
+#include <dirent.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <time.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <math.h>
+
+#include "assets.h"
+#include "nds_loader_arm9.h"
+
+// ------------------------------------------------------------------ ayarlar
+#define NDS_DIR         "fat:/01 - Games"
+#define GBA_DIR         "fat:/GBA/gba"
+#define GB_DIR          "fat:/GB"
+#define LABEL_DIR       "fat:/_macro/labels"
+#define YSMENU_KERNEL   "fat:/_macro/ysmenu.dat"     // kartin orijinal R4.dat'i (YSMenu cekirdegi)
+#define YSMENU_INI      "fat:/TTMenu/YSMenu.ini"
+#define GBAR2_A7        "fat:/_nds/GBARunner2_arm7dldi_ds.nds"
+#define GAMEYOB         "fat:/_nds/TWiLightMenu/emulators/gameyob.nds"
+#define MAX_GAMES       96
+#define MAX_LABELS      48
+#define MAX_COVERS      1
+
+#define FX(f) ((s32)((f) * 4096))
+
+// Renk paleti (RGB15)
+#define C_BG0       RGB15(1, 1, 3)
+#define C_BG1       RGB15(0, 0, 1)
+#define C_INK       RGB15(3, 4, 6)
+#define C_TEXT      RGB15(31, 31, 31)
+#define C_MUTED     RGB15(17, 19, 23)
+#define C_FAINT     RGB15(9, 10, 13)
+#define C_ACCENT    RGB15(11, 19, 31)
+#define C_CYAN      RGB15(12, 27, 31)
+#define C_VIOLET    RGB15(20, 10, 31)
+#define C_WHITE     RGB15(31, 31, 31)
+#define C_BLACK     RGB15(0, 0, 0)
+#define C_SHADOW    RGB15(0, 0, 1)
+#define C_BG_TOP    C_WHITE
+// acik ("Polar") tema
+#define P_BG        RGB15(29, 29, 30)
+#define P_PANEL     RGB15(31, 31, 31)
+#define P_INK       RGB15(3, 4, 6)
+#define P_MUTED     RGB15(13, 14, 17)
+#define P_FAINT     RGB15(24, 25, 27)
+#define P_LINE      RGB15(26, 26, 28)
+
+enum { T_GBA, T_GB, T_GBC, T_NDS };
+enum { TAB_NDS, TAB_GBA, TAB_GB, TAB_N };
+
+typedef struct {
+    char file[128];     // dosya adi
+    char title[72];     // ekranda gorunen ad
+    char sub[48];       // ikinci satir (NDS: yayinci)
+    int type;
+    int tab;            // hangi sekmede
+    int sep;            // 1 = bolum basligi (GBA klasorundeki ayirici dosya), oyun degil
+    int label;          // etiket dokusu, -1 = yok
+    int cover;          // (kullanilmiyor)
+    int coverW, coverH;
+    u16 c1, c2;         // etiketi olmayan oyunlar icin renk
+    u16 tint;           // oyunun baskin rengi
+    u8 cgb;             // GB/GBC rom basligi 0x143
+    u8 clear;
+    u8 hasSave;
+    u16 shell;          // kartus plastigi rengi
+    u16 *icon;          // 32x32 kucuk resim (liste icin), BIT15 = opak
+    u16 *thumb;         // 72x54 kucuk kapak
+    u16 *hero;          // alt ekrandaki buyuk kapak (en fazla 104x92)
+    int heroW, heroH;
+    u16 *tile;          // ust ekran resmi (GBA/GB: etiketin tamami, en fazla 72x64)
+    int tileW, tileH;
+    u16 *mini;          // alt seritteki kucuk kartus (44x40)
+    u16 *bg;            // ust ekran arka plani: kapagin bulanik hali (128x96)
+    u8 bgTried;         // .bgb okunmaya calisildi mi (tembel yukleme)
+} Game;
+
+static Game games[MAX_GAMES];
+static int gameCount = 0;
+
+static glImage fontS[FONT_S_N], fontL[FONT_L_N];
+static glImage logoW[1], dotImg[1], cartImg[1], gbCartImg[1], dsCartImg[1];
+static glImage labelImg[MAX_LABELS][1];
+static int labelCount = 0;
+static glImage coverImg[MAX_COVERS][1];
+static int coverCount = 0;
+
+// stb_image (stb_impl.c)
+extern unsigned char *macro_png_load(const char *path, int *w, int *h, const char **err);
+extern void macro_png_free(unsigned char *p);
+
+static int frame = 0;
+static int polyId = 1;
+
+// ------------------------------------------------------------------ yardimcilar
+static inline float clampf(float v, float a, float b) { return v < a ? a : (v > b ? b : v); }
+static inline float easeOut(float t) { t = clampf(t, 0, 1); return 1 - (1 - t) * (1 - t) * (1 - t); }
+static inline float easeOut5(float t) { t = clampf(t, 0, 1); float u = 1 - t; return 1 - u * u * u * u * u; }
+static inline float easeIn(float t) { t = clampf(t, 0, 1); return t * t * t; }
+static inline float easeInOut(float t) { t = clampf(t, 0, 1); return t * t * (3 - 2 * t); }
+static inline float easeBack(float t)
+{
+    t = clampf(t, 0, 1) - 1;
+    return 1 + 2.70158f * t * t * t + 1.70158f * t * t;
+}
+static inline float lerpf(float a, float b, float t) { return a + (b - a) * t; }
+// 0..1 araliginda: a'da baslar, b'de biter
+static inline float span(float t, float a, float b) { return clampf((t - a) / (b - a), 0, 1); }
+
+static u16 mixColor(u16 a, u16 b, float t)
+{
+    t = clampf(t, 0, 1);
+    int r = (a & 31) + (int)(((b & 31) - (a & 31)) * t);
+    int g = ((a >> 5) & 31) + (int)((((b >> 5) & 31) - ((a >> 5) & 31)) * t);
+    int bl = ((a >> 10) & 31) + (int)((((b >> 10) & 31) - ((a >> 10) & 31)) * t);
+    return RGB15(r, g, bl);
+}
+
+// Rengi canli ve parlak tut (koyu temada ortam isigi icin)
+static u16 vivid(u16 c, float minBright)
+{
+    int r = c & 31, g = (c >> 5) & 31, b = (c >> 10) & 31;
+    int m = r > g ? (r > b ? r : b) : (g > b ? g : b);
+    if (m == 0) return RGB15(10, 14, 28);
+    float k = minBright * 31 / m;
+    if (k < 1) k = 1;
+    r = (int)(r * k); g = (int)(g * k); b = (int)(b * k);
+    return RGB15(r > 31 ? 31 : r, g > 31 ? 31 : g, b > 31 ? 31 : b);
+}
+
+// Saydamlik: 0 = gorunmez, 31 = tam opak. Her yari saydam cizim farkli polygon ID ister.
+static void alpha(int a)
+{
+    if (a < 1) a = 1;
+    if (a > 31) a = 31;
+    polyId = polyId % 62 + 1;
+    glPolyFmt(POLY_ALPHA(a) | POLY_CULL_NONE | POLY_ID(polyId));
+}
+
+static float sinf_(float x)  // hizli sinus (donanim tablosu)
+{
+    int a = (int)(x * 32768.0f / 6.2831853f);
+    return sinLerp((s16)a) / 4096.0f;
+}
+static inline float cosf_(float x) { return sinf_(x + 1.5707963f); }
+
+// ------------------------------------------------------------------ yazi
+static int glyphIndex(u32 cp)
+{
+    if (cp >= 32 && cp < 127) return cp - 32;          // ASCII: dogrudan
+    for (int i = 95; i < FONT_S_N; i++)
+        if (font_codepoints[i] == cp) return i;
+    return '?' - 32;
+}
+
+static u32 nextCodepoint(const char **s)
+{
+    const u8 *p = (const u8 *)*s;
+    u32 c = *p++;
+    if (c >= 0xC0 && c < 0xE0) c = ((c & 0x1F) << 6) | (*p++ & 0x3F);
+    else if (c >= 0xE0) { c = ((c & 0x0F) << 12) | ((p[0] & 0x3F) << 6) | (p[1] & 0x3F); p += 2; }
+    *s = (const char *)p;
+    return c;
+}
+
+static int textWidthSp(int large, const char *s, int sp)
+{
+    const u8 *adv = large ? font_l_adv : font_s_adv;
+    int w = 0, n = 0;
+    while (*s) { w += adv[glyphIndex(nextCodepoint(&s))]; n++; }
+    return w + (n > 1 ? (n - 1) * sp : 0);
+}
+static int textWidth(int large, const char *s) { return textWidthSp(large, s, 0); }
+
+// align: 0 sol, 1 orta, 2 sag ; sp: harf araligi (piksel)
+static void drawTextSp(int large, int x, int y, const char *s, u16 color, int a, int align, int sp)
+{
+    if (a <= 0) return;
+    const glImage *f = large ? fontL : fontS;
+    const u8 *adv = large ? font_l_adv : font_s_adv;
+    if (align == 1) x -= textWidthSp(large, s, sp) / 2;
+    else if (align == 2) x -= textWidthSp(large, s, sp);
+    glColor(color);
+    alpha(a);
+    while (*s) {
+        int g = glyphIndex(nextCodepoint(&s));
+        if (g != 0) glSprite(x, y, GL_FLIP_NONE, &f[g]);
+        x += adv[g] + sp;
+    }
+    glColor(C_WHITE);
+}
+static void drawText(int large, int x, int y, const char *s, u16 color, int a, int align)
+{
+    drawTextSp(large, x, y, s, color, a, align, 0);
+}
+
+// Yaziyi hafif golgeli ciz (koyu zeminde okunakli)
+static void drawTextShadow(int large, int x, int y, const char *s, u16 color, int a, int align)
+{
+    drawText(large, x + 1, y + 1, s, C_BLACK, a * 2 / 3, align);
+    drawText(large, x, y, s, color, a, align);
+}
+
+// Uzun adlari sigdir
+static void fitText(int large, char *out, const char *in, int maxW)
+{
+    strcpy(out, in);
+    if (textWidth(large, out) <= maxW) return;
+    int n = strlen(out);
+    while (n > 1) {
+        n--;
+        while (n > 0 && ((u8)out[n] & 0xC0) == 0x80) n--;  // UTF-8 ortasinda kesme
+        out[n] = 0;
+        char tmp[96];
+        snprintf(tmp, sizeof(tmp), "%s...", out);
+        if (textWidth(large, tmp) <= maxW) { strcpy(out, tmp); return; }
+    }
+}
+
+// ------------------------------------------------------------------ 2B cizim parcalari
+static void sprite(const glImage *img, float cx, float cy, float sx, float sy, u16 color, int a)
+{
+    if (a <= 0) return;
+    glColor(color);
+    alpha(a);
+    glSpriteScaleXY((int)(cx - img->width * sx / 2), (int)(cy - img->height * sy / 2),
+                    FX(sx), FX(sy), GL_FLIP_NONE, img);
+    glColor(C_WHITE);
+}
+
+static void box(int x1, int y1, int x2, int y2, u16 color, int a)
+{
+    if (a <= 0) return;
+    alpha(a);
+    glBoxFilled(x1, y1, x2, y2, color);
+}
+
+static void gbox(int x1, int y1, int x2, int y2, u16 top, u16 bot, int a)
+{
+    if (a <= 0) return;
+    alpha(a);
+    glBoxFilledGradient(x1, y1, x2, y2, top, bot, bot, top);
+}
+
+static void roundBox(int x1, int y1, int x2, int y2, u16 color, int a)
+{
+    if (a <= 0) return;
+    alpha(a);
+    glBoxFilled(x1 + 2, y1, x2 - 2, y2, color);
+    glBoxFilled(x1, y1 + 2, x1 + 1, y2 - 2, color);
+    glBoxFilled(x2 - 1, y1 + 2, x2, y2 - 2, color);
+    glBoxFilled(x1 + 1, y1 + 1, x1 + 1, y2 - 1, color);
+    glBoxFilled(x2 - 1, y1 + 1, x2 - 1, y2 - 1, color);
+}
+
+// Hap (pill) seklinde: uclari yarim daire (yumusak nokta dokusuyla)
+static void pill(int x1, int y1, int x2, int y2, u16 color, int a)
+{
+    if (a <= 0) return;
+    int h = y2 - y1 + 1, r = h / 2;
+    alpha(a);
+    glBoxFilled(x1 + r, y1, x2 - r, y2, color);
+    for (int yy = 0; yy < h; yy++) {               // yarim daireler, satir satir
+        float d = (yy + 0.5f - h / 2.0f) / (h / 2.0f);
+        int w = (int)(r * sqrtf(clampf(1 - d * d, 0, 1)) + 0.5f);
+        if (w <= 0) continue;
+        glBoxFilled(x1 + r - w, y1 + yy, x1 + r - 1, y1 + yy, color);
+        glBoxFilled(x2 - r + 1, y1 + yy, x2 - r + w, y1 + yy, color);
+    }
+}
+
+// 2B dokulu dortgen, dokunun bir parcasini (u0..u1, v0..v1 orani) cizer
+static void quad2D(const glImage *img, int x0, int y0, int x1, int y1, float fu0, float fu1, u16 col, int a)
+{
+    if (a <= 0 || x1 <= x0) return;
+    int u0 = img->u_off + (int)(img->width * fu0), u1 = img->u_off + (int)(img->width * fu1);
+    int v0 = img->v_off, v1 = img->v_off + img->height;
+    alpha(a);
+    glBindTexture(0, img->textureID);
+    glColor(col);
+    glBegin(GL_QUADS);
+    glTexCoord2t16(inttot16(u0), inttot16(v0)); glVertex3v16(x0, y0, 400);
+    glTexCoord2t16(inttot16(u0), inttot16(v1)); glVertex3v16(x0, y1, 400);
+    glTexCoord2t16(inttot16(u1), inttot16(v1)); glVertex3v16(x1, y1, 400);
+    glTexCoord2t16(inttot16(u1), inttot16(v0)); glVertex3v16(x1, y0, 400);
+    glEnd();
+    glColor(C_WHITE);
+}
+
+// Ucgen (ok isaretleri, isik huzmeleri)
+static void tri(int x1, int y1, int x2, int y2, int x3, int y3, u16 c1, u16 c2, u16 c3, int a)
+{
+    if (a <= 0) return;
+    alpha(a);
+    glTriangleFilledGradient(x1, y1, x2, y2, x3, y3, c1, c2, c3);
+}
+
+// ------------------------------------------------------------------ katmanlar
+// Arka plan katmani: derinlikte en arkada.  Arayuz katmani: en onde.
+static void beginBack(void) { glBegin2D(); glTranslatef32(0, 0, -3890); }   // z = -0.95
+static void beginFront(void) { glBegin2D(); glTranslatef32(0, 0, 3072); }   // z = +0.75
+static void end2D(void) { glEnd2D(); }
+
+static void endFrame(void)
+{
+    glFlush(GL_TRANS_MANUALSORT);
+    swiWaitForVBlank();
+    frame++;
+}
+
+// ------------------------------------------------------------------ 3B sahne
+// Kamera orijinde, -z'ye bakar. Dikey gorus acisi 50 derece.
+// Ozel izdusum: derinlik degerleri 2B katmanlarin arasina sigsin diye sikistirilir
+// (uzaklik 2 -> NDC -0.3, sonsuz -> NDC 0.7).
+#define CAM_F     2.1445069f            // 1 / tan(25 derece)
+#define CAM_D     3.30f                 // ortadaki kartusun uzakligi
+#define CART_Y    0.45f                 // ortadaki kartusun yuksekligi (ekranda ~y 74)
+#define CART_S    1.15f                 // ortadaki kartusun olcegi (doku 1:1 piksel = net)
+
+static void begin3D(void)
+{
+    m4x4 m;
+    memset(&m, 0, sizeof(m));
+    m.m[0] = floattof32(CAM_F * 192.0f / 256.0f);
+    m.m[5] = floattof32(CAM_F);
+    m.m[10] = floattof32(-0.7f);
+    m.m[11] = floattof32(-1.0f);
+    m.m[14] = floattof32(-2.0f);
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrix4x4(&m);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+}
+
+// Dunya noktasini ekran pikseline cevir (2B isiklari 3B nesnelerle hizalamak icin)
+static void project(float x, float y, float z, float *sx, float *sy)
+{
+    float d = -z;
+    if (d < 0.1f) d = 0.1f;
+    *sx = 128 + x * CAM_F * 96 / d;
+    *sy = 96 - y * CAM_F * 96 / d;
+}
+
+static inline int deg(float d) { return (int)(d * 32768.0f / 360.0f); }
+
+// Yerel koordinatlarda dokulu dortgen (y yukari). Ust ve alt koseler farkli renk alabilir.
+static void quad3(const glImage *img, float x0, float yT, float x1, float yB, float z,
+                  u16 cT, u16 cB, int flipV)
+{
+    int u0 = img->u_off, v0 = img->v_off, u1 = u0 + img->width, v1 = v0 + img->height;
+    if (flipV) { int t = v0; v0 = v1; v1 = t; }
+    v16 X0 = floattov16(x0), X1 = floattov16(x1), YT = floattov16(yT), YB = floattov16(yB), Z = floattov16(z);
+    glBindTexture(0, img->textureID);
+    glBegin(GL_QUADS);
+    glColor(cT); glTexCoord2t16(inttot16(u0), inttot16(v0)); glVertex3v16(X0, YT, Z);
+    glColor(cB); glTexCoord2t16(inttot16(u0), inttot16(v1)); glVertex3v16(X0, YB, Z);
+    glTexCoord2t16(inttot16(u1), inttot16(v1)); glVertex3v16(X1, YB, Z);
+    glColor(cT); glTexCoord2t16(inttot16(u1), inttot16(v0)); glVertex3v16(X1, YT, Z);
+    glEnd();
+}
+
+// Paralelkenar (egik isik seridi)
+static void quad3skew(const glImage *img, float x0, float yT, float x1, float yB, float skew, float z, u16 c)
+{
+    int u0 = img->u_off, v0 = img->v_off, u1 = u0 + img->width, v1 = v0 + img->height;
+    glBindTexture(0, img->textureID);
+    glColor(c);
+    glBegin(GL_QUADS);
+    glTexCoord2t16(inttot16(u0), inttot16(v0)); glVertex3v16(floattov16(x0 + skew), floattov16(yT), floattov16(z));
+    glTexCoord2t16(inttot16(u0), inttot16(v1)); glVertex3v16(floattov16(x0), floattov16(yB), floattov16(z));
+    glTexCoord2t16(inttot16(u1), inttot16(v1)); glVertex3v16(floattov16(x1), floattov16(yB), floattov16(z));
+    glTexCoord2t16(inttot16(u1), inttot16(v0)); glVertex3v16(floattov16(x1 + skew), floattov16(yT), floattov16(z));
+    glEnd();
+}
+

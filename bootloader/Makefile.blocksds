@@ -1,0 +1,56 @@
+# load.bin (ARM7 bootloader) - BlocksDS / Wonderful toolchain ile derleme
+# Kaynak: TWiLight Menu++ booter_fc/bootloader (GPLv2)
+TC      := /opt/wonderful/toolchain/gcc-arm-none-eabi/bin/arm-none-eabi-
+CC      := $(TC)gcc
+OBJCOPY := $(TC)objcopy
+LIBNDS  := /opt/blocksds/core/libs/libnds
+UNIV    := ../universal
+OUT     := build
+
+ARCH    := -mthumb -mthumb-interwork
+CFLAGS  := -g -Wall -O2 -mcpu=arm7tdmi -mtune=arm7tdmi -fomit-frame-pointer -ffast-math \
+           $(ARCH) -DARM7 -I$(UNIV)/include -I$(LIBNDS)/include -I$(OUT) -Isource \
+           -Wno-unused-variable -Wno-unused-but-set-variable -Wno-address-of-packed-member
+ASFLAGS := -g $(ARCH) -mcpu=arm7tdmi -x assembler-with-cpp -I$(OUT) -Isource -I$(LIBNDS)/include
+LDFLAGS := -nostartfiles -T load.ld -g $(ARCH) -Wl,-Map,$(OUT)/load.map
+
+CSRC := $(wildcard source/*.c) $(UNIV)/source/tonccpy/tonccpy.c
+SSRC := $(wildcard source/*.s)
+OBJS := $(patsubst %.c,$(OUT)/%.o,$(notdir $(CSRC))) $(patsubst %.s,$(OUT)/%.o,$(notdir $(SSRC)))
+
+vpath %.c source $(UNIV)/source/tonccpy
+vpath %.s source
+
+all: $(OUT)/load.bin
+
+$(OUT):
+	mkdir -p $(OUT)
+
+$(OUT)/mpu_reset.elf: arm9code/mpu_reset.s | $(OUT)
+	$(CC) -g $(ARCH) -mcpu=arm946e-s -DARM9 -I$(LIBNDS)/include -Ttext=0 -x assembler-with-cpp -nostartfiles -nostdlib $< -o $@
+
+$(OUT)/mpu_reset.bin: $(OUT)/mpu_reset.elf
+	$(OBJCOPY) -O binary $< $@
+
+$(OUT)/arm9mpu_reset.o: arm9mpu_reset.s $(OUT)/mpu_reset.bin
+	cd $(OUT) && $(CC) $(ASFLAGS) -c ../source/arm9mpu_reset.s -o arm9mpu_reset.o
+
+# devkitARM kurali: *.arm.c dosyalari ARM kipinde derlenir (ARM9 bu koda ARM kipinde atlar)
+$(OUT)/%.arm.o: %.arm.c | $(OUT)
+	$(CC) $(CFLAGS) -marm -c $< -o $@
+
+$(OUT)/%.o: %.c | $(OUT)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OUT)/%.o: %.s | $(OUT)
+	$(CC) $(ASFLAGS) -c $< -o $@
+
+$(OUT)/load.elf: $(OBJS)
+	$(CC) $(LDFLAGS) $(OBJS) -o $@
+
+$(OUT)/load.bin: $(OUT)/load.elf
+	$(OBJCOPY) -O binary $< $@
+	@ls -la $@
+
+clean:
+	rm -rf $(OUT)

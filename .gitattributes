@@ -1,2 +1,5 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Kaynaklar LF satir sonuyla kalsin (build.sh WSL/bash icinde calisir; CRLF onu bozar)
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.nds binary
